@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M2: byte-level Meade LX200GPS / Autostar II protocol (command catalog with reply shapes, sexagesimal
+    formats, safety layer, synchronous connection with trace and resync). Reused later by the M4 driver.
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.Lx200</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same version as upstream NINA.Core; ships runtimes/osx-arm64/native/libSystem.IO.Ports.Native.dylib -->
+    <PackageReference Include="System.IO.Ports" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.Lx200.Test" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    macOS services the app needs at the scope: sleep / App Nap prevention, power source, bundle-aware resource
+    paths and user data folders. P/Invoke only (IOKit, CoreFoundation, libobjc); no engine or UI dependency.
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.Platform</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.App.Test" />
+  </ItemGroup>
+
+</Project>

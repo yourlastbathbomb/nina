@@ -1,0 +1,91 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             xmlns:platform="using:NINA.Mac.Platform"
+             x:Class="NINA.Mac.App.Views.ConnectView"
+             x:DataType="vm:ConnectViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <ScrollViewer>
+    <StackPanel Spacing="14" MaxWidth="900" HorizontalAlignment="Left">
+
+      <Border Classes="card">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Start the night" Classes="h2" />
+            <TextBlock Text="Connects the camera and the mount together, then starts cooling." Classes="muted" TextWrapping="Wrap" />
+            <CheckBox Name="CoolAfterConnect" IsChecked="{Binding CoolAfterConnect}" Margin="0,6,0,0">
+              <TextBlock>
+                <Run Text="Cool to" />
+                <Run Text="{Binding CoolingTarget, StringFormat='{}{0:0} °C'}" />
+                <Run Text="after connecting" />
+              </TextBlock>
+            </CheckBox>
+          </StackPanel>
+          <Button Grid.Column="1" Name="StartNightButton" Classes="accent" Padding="22,12" VerticalAlignment="Center" FontSize="15"
+                  Content="Connect all" Command="{Binding StartNightCommand}" IsEnabled="{Binding CanStartNight}" />
+        </Grid>
+      </Border>
+
+      <!-- Camera -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+          <Ellipse Classes="dot" Margin="0,0,12,0" Classes.connected="{Binding Camera.IsConnected}" Classes.busy="{Binding Camera.IsConnecting}" Classes.lost="{Binding Camera.IsLost}" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="{Binding Camera.Name}" FontWeight="SemiBold" FontSize="15" />
+            <TextBlock Text="{Binding Camera.StateText}" Classes="muted" />
+            <TextBlock Name="CameraDetail" Text="{Binding Camera.Detail}" Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Name="ConnectCameraButton" Content="Connect" Command="{Binding ConnectCameraCommand}" IsVisible="{Binding !Camera.IsConnected}" />
+            <Button Name="DisconnectCameraButton" Content="Disconnect" Command="{Binding DisconnectCameraCommand}" IsVisible="{Binding Camera.IsConnected}" />
+          </StackPanel>
+          <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Name="ColdWarning" Margin="0,8,0,0" Classes="warn" TextWrapping="Wrap"
+                     Text="{Binding ColdDisconnectWarning}" IsVisible="{Binding ColdDisconnectWarning, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        </Grid>
+      </Border>
+
+      <!-- Mount -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+          <Ellipse Classes="dot" Margin="0,0,12,0" Classes.connected="{Binding Mount.IsConnected}" Classes.busy="{Binding Mount.IsConnecting}" Classes.lost="{Binding Mount.IsLost}" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="{Binding Mount.Name}" FontWeight="SemiBold" FontSize="15" />
+            <TextBlock Text="{Binding Mount.StateText}" Classes="muted" />
+            <TextBlock Text="{Binding Mount.Detail}" Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Name="ConnectMountButton" Content="Connect" Command="{Binding ConnectMountCommand}" IsVisible="{Binding !Mount.IsConnected}" />
+            <Button Name="DisconnectMountButton" Content="Disconnect" Command="{Binding DisconnectMountCommand}" IsVisible="{Binding Mount.IsConnected}" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+            <TextBlock Text="Serial port" VerticalAlignment="Center" Classes="muted" />
+            <ComboBox Name="PortPicker" MinWidth="320" ItemsSource="{Binding Ports}" SelectedItem="{Binding SelectedPort}" IsEnabled="{Binding Mount.IsDisconnected}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate x:DataType="platform:SerialPortInfo">
+                  <TextBlock Text="{Binding Path}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Content="Rescan" Command="{Binding RefreshPortsCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <!-- Focuser -->
+      <Border Classes="card">
+        <Grid ColumnDefinitions="Auto,*">
+          <Ellipse Classes="dot" Margin="0,0,12,0" Classes.connected="{Binding Focuser.IsConnected}" Classes.busy="{Binding Focuser.IsConnecting}" Classes.lost="{Binding Focuser.IsLost}" />
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Text="{Binding Focuser.Name}" FontWeight="SemiBold" FontSize="15" />
+            <TextBlock Text="{Binding Focuser.StateText}" Classes="muted" />
+            <TextBlock Text="{Binding Focuser.Detail}" Classes="muted small" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <TextBlock Text="{Binding SimulationNote}" Classes="warn small" TextWrapping="Wrap" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

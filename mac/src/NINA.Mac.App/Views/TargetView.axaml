@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             xmlns:astro="using:NINA.Mac.App.Astro"
+             x:Class="NINA.Mac.App.Views.TargetView"
+             x:DataType="vm:TargetViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <Grid ColumnDefinitions="300,*" MaxWidth="1200" HorizontalAlignment="Left">
+    <Border Classes="card" Margin="0,0,14,0">
+      <DockPanel>
+        <TextBox DockPanel.Dock="Top" Name="SearchBox" Text="{Binding SearchText}" PlaceholderText="Search: M42, NGC 253, Helix…" Margin="0,0,0,10" />
+        <TextBlock DockPanel.Dock="Bottom" Text="Built-in list until the engine's object database works on macOS (M3)." Classes="muted small" TextWrapping="Wrap" Margin="0,8,0,0" />
+        <ListBox Name="Results" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedTarget}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="astro:CatalogTarget">
+              <StackPanel>
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding CommonName}" Classes="muted small" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <ScrollViewer Grid.Column="1">
+      <StackPanel Spacing="14">
+        <Border Classes="card" IsVisible="{Binding HasTarget}">
+          <StackPanel Spacing="6">
+            <TextBlock Name="TargetName" Text="{Binding SelectedTarget.Display, FallbackValue=''}" Classes="h1" />
+            <TextBlock Text="{Binding CoordinatesText}" Classes="muted" />
+            <TextBlock Name="AltAz" Text="{Binding AltAzText}" FontSize="15" />
+            <TextBlock Text="{Binding TransitText}" />
+            <TextBlock Name="MaxSub" Text="{Binding MaxSubText}" FontWeight="SemiBold" Classes.warn="{Binding ExceedsFieldRotationLimit}" />
+            <TextBlock Text="{Binding OpticsText}" Classes="muted small" />
+            <ItemsControl Name="Warnings" ItemsSource="{Binding Warnings}" Margin="0,6,0,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="x:String">
+                  <TextBlock Text="{Binding StringFormat='• {0}'}" Classes="warn" TextWrapping="Wrap" Margin="0,2" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Text="Observable now." Classes="muted" IsVisible="{Binding IsObservable}" />
+          </StackPanel>
+        </Border>
+
+        <Border Classes="card" IsVisible="{Binding HasTarget}">
+          <StackPanel Spacing="10">
+            <TextBlock Text="Plan" Classes="h2" />
+            <WrapPanel Orientation="Horizontal">
+              <StackPanel Margin="0,0,18,8">
+                <TextBlock Text="Sub length (s)" Classes="muted small" />
+                <NumericUpDown Name="ExposureInput" Value="{Binding ExposureSeconds}" Minimum="1" Maximum="600" Increment="5" FormatString="0" Width="130" />
+              </StackPanel>
+              <StackPanel Margin="0,0,18,8">
+                <TextBlock Text="Frames" Classes="muted small" />
+                <NumericUpDown Value="{Binding FrameCount}" Minimum="1" Maximum="2000" Increment="10" FormatString="0" Width="130" />
+              </StackPanel>
+              <StackPanel Margin="0,0,18,8">
+                <TextBlock Text="Dither every" Classes="muted small" />
+                <NumericUpDown Value="{Binding DitherEvery}" Minimum="0" Maximum="100" Increment="1" FormatString="0" Width="130" />
+              </StackPanel>
+              <CheckBox IsChecked="{Binding StopAtDawn}" Content="Stop at astronomical dawn" VerticalAlignment="Bottom" Margin="0,0,0,8" />
+            </WrapPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Name="SlewButton" Content="Slew" Command="{Binding SlewAndCentreCommand}" />
+              <Button Name="UseForRunButton" Classes="accent" Content="Use for Run" Command="{Binding UseForRunCommand}" />
+            </StackPanel>
+            <TextBlock Text="{Binding SlewStatus}" Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

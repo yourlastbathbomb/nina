@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Astrometry compiled for net10.0 / osx-arm64 (headless engine). Upstream files are linked, never copied.
+    Mac/ holds the mac-only files compiled into the same assembly. See ../README-engine.md.
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Astrometry</AssemblyName>
+    <RootNamespace>NINA.Astrometry</RootNamespace>
+    <UpstreamDir>$(NinaRoot)NINA.Astrometry/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+
+    <!-- XAML value converters (IValueConverter / IMultiValueConverter): only XAML bindings use them -->
+    <Compile Remove="$(UpstreamDir)Converters/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <!-- DllImport resolver (SOFA_2023_10_11.dll -> libsofa.dylib, NOVAS31lib.dll -> libnovas31.dylib) plus the dylibs and External/JPLEPH -->
+    <ProjectReference Include="../NINA.Mac.Native/NINA.Mac.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    Catalogue database scripts. NINADbContext (NINA.Core) creates and migrates the SQLite database from
+    <BaseDirectory>/Database/Initial and <BaseDirectory>/Database/Migration. Upstream ships them from the NINA app project
+    (NINA.csproj); on macOS they travel with NINA.Astrometry, whose DatabaseInteraction is the only engine gateway to the database.
+  -->
+  <ItemGroup>
+    <None Include="$(NinaRoot)NINA/Database/**/*.sql" LinkBase="Database" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.Astrometry.csproj -->
+  <ItemGroup>
+    <PackageReference Include="Fastenshtein" Version="1.0.12" />
+    <PackageReference Include="Nito.AsyncEx.Context" Version="5.1.2" />
+    <PackageReference Include="Nito.Disposables" Version="2.5.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

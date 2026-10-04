@@ -38,7 +38,15 @@ namespace NINA.Astrometry {
         private string connectionString;
 
         public DatabaseInteraction()
-            : this(string.Format(@"Data Source={0};", Environment.ExpandEnvironmentVariables(@"%localappdata%\NINA\NINA.sqlite"))) {
+            : this(string.Format(@"Data Source={0};", DefaultDatabaseLocation())) {
+        }
+
+        private static string DefaultDatabaseLocation() {
+            if (!OperatingSystem.IsWindows()) {
+                // %localappdata% and '\' only work on Windows; elsewhere use NINA's data folder (LocalApplicationData/NINA)
+                return Path.Combine(CoreUtil.APPLICATIONTEMPPATH, "NINA.sqlite");
+            }
+            return Environment.ExpandEnvironmentVariables(@"%localappdata%\NINA\NINA.sqlite");
         }
 
         public DatabaseInteraction(string connectionString) {

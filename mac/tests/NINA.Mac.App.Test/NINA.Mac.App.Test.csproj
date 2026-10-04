@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.App.Test</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Opt out of Avalonia.BuildServices build telemetry (see NINA.Mac.App.csproj) -->
+    <UsedAvaloniaProducts></UsedAvaloniaProducts>
+  </PropertyGroup>
+
+  <!--
+    Avalonia.Headless.NUnit 12.x requires NUnit >= 4.5.1, but the mac test stack pins NUnit 4.4.0. The tests drive
+    Avalonia.Headless's HeadlessUnitTestSession directly instead (see HeadlessTestBase.cs).
+  -->
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Platform/NINA.Mac.Platform.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.App/NINA.Mac.App.csproj" />
+  </ItemGroup>
+
+</Project>

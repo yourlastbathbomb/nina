@@ -44,6 +44,12 @@ namespace NINA.Core.Utility {
         }
 
         public static void LoadDllFromAbsolutePath(string dllPath) {
+            if (!OperatingSystem.IsWindows()) {
+                // Preloading uses kernel32. Other platforms resolve native libraries through NativeLibrary import resolvers.
+                Logger.Debug($"Skipping preload of {dllPath}: DllLoader only preloads on Windows");
+                return;
+            }
+
             lock (lockobj) {
                 SetDllDirectory(System.IO.Path.GetDirectoryName(dllPath));
 

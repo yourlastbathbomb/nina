@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M5: managed, WPF-free, System.Drawing-free star detection / HFR / Bahtinov / image statistics for the macOS port.
+    Ports of upstream NINA.Image algorithms (MPL-2.0). The Accord.NET-derived filters live in the separate LGPL
+    assembly under Accord/ so they stay replaceable, as Accord.Imaging is for upstream.
+  -->
+
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.ImageAnalysis</RootNamespace>
+    <AssemblyName>NINA.Mac.ImageAnalysis</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- sub projects living in this folder -->
+    <Compile Remove="Accord/**;Cli/**" />
+    <None Remove="Accord/**;Cli/**" />
+    <EmbeddedResource Remove="Accord/**;Cli/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="Accord/NINA.Mac.ImageAnalysis.Accord.csproj" />
+  </ItemGroup>
+
+</Project>

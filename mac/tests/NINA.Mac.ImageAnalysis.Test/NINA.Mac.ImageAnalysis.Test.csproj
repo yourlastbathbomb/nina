@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.ImageAnalysis.Test</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the test-only Accord oracle is its own project -->
+    <Compile Remove="AccordOracle/**" />
+    <None Remove="AccordOracle/**" />
+    <EmbeddedResource Remove="AccordOracle/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.ImageAnalysis/NINA.Mac.ImageAnalysis.csproj" />
+    <ProjectReference Include="AccordOracle/NINA.Mac.ImageAnalysis.AccordOracle.csproj" />
+  </ItemGroup>
+
+</Project>

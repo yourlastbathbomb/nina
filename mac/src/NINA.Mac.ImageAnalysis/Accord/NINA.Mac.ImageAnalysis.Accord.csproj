@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LGPL part of the macOS image-analysis library: managed ports of the AForge.NET / Accord.NET imaging filters that
+    upstream N.I.N.A. calls through the vendored Accord.Imaging (Canny, SIS threshold, 3x3 dilation, blob counter,
+    shape checker, bicubic resize, median, Hough lines, grayscale/16->8 bit conversion). Kept as its own assembly so
+    it stays a separately replaceable LGPL library, exactly like Accord.Imaging is for upstream N.I.N.A.
+    No System.Drawing, no WPF, no native code; works on plain byte[] planes.
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Mac.ImageAnalysis.Accord</AssemblyName>
+    <RootNamespace>NINA.Mac.ImageAnalysis.AccordPort</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

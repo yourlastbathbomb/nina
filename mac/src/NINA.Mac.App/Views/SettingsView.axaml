@@ -1,0 +1,124 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             xmlns:views="using:NINA.Mac.App.Views"
+             x:Class="NINA.Mac.App.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <UserControl.Styles>
+    <Style Selector="NumericUpDown">
+      <Setter Property="Width" Value="150" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="Width" Value="190" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    </Style>
+    <Style Selector="StackPanel.row">
+      <Setter Property="Orientation" Value="Horizontal" />
+      <Setter Property="Spacing" Value="8" />
+      <Setter Property="Margin" Value="0,3" />
+    </Style>
+  </UserControl.Styles>
+
+  <ScrollViewer>
+    <StackPanel Spacing="14" MaxWidth="980" HorizontalAlignment="Left">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button Name="SaveButton" Classes="accent" Content="Save" Command="{Binding SaveCommand}" Padding="20,8" />
+        <Button Content="Revert" Command="{Binding RevertCommand}" />
+        <TextBlock Text="{Binding SavedMessage}" Classes="muted small" VerticalAlignment="Center" />
+      </StackPanel>
+
+      <Grid ColumnDefinitions="*,*">
+        <Border Classes="card" Margin="0,0,14,0">
+          <StackPanel>
+            <TextBlock Text="Site" Classes="h2" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Name" /><TextBox Text="{Binding Draft.Site.Name}" Width="220" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Latitude (°, N +)" /><NumericUpDown Name="Latitude" Value="{Binding Draft.Site.LatitudeDegrees}" Minimum="-90" Maximum="90" Increment="0.01" FormatString="0.0000" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Longitude (°, E +)" /><NumericUpDown Value="{Binding Draft.Site.LongitudeDegrees}" Minimum="-180" Maximum="180" Increment="0.01" FormatString="0.0000" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Elevation (m)" /><NumericUpDown Value="{Binding Draft.Site.ElevationMeters}" Minimum="-500" Maximum="6000" Increment="10" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="UTC offset (h)" /><NumericUpDown Value="{Binding Draft.Site.UtcOffsetHours}" Minimum="-12" Maximum="14" Increment="0.5" FormatString="0.#" /></StackPanel>
+          </StackPanel>
+        </Border>
+        <Border Classes="card" Grid.Column="1">
+          <StackPanel>
+            <TextBlock Text="Optics" Classes="h2" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Focal length (mm)" /><NumericUpDown Value="{Binding Draft.Optics.FocalLengthMm}" Minimum="100" Maximum="5000" Increment="10" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="With f/6.3 reducer (mm)" /><NumericUpDown Value="{Binding Draft.Optics.ReducerFocalLengthMm}" Minimum="100" Maximum="5000" Increment="10" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Reducer fitted" /><CheckBox IsChecked="{Binding Draft.Optics.UseReducer}" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Pixel size (µm)" /><NumericUpDown Value="{Binding Draft.Optics.PixelSizeMicrons}" Minimum="0.5" Maximum="20" Increment="0.1" FormatString="0.00" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Binning" /><NumericUpDown Value="{Binding Draft.Optics.Bin}" Minimum="1" Maximum="4" Increment="1" FormatString="0" /></StackPanel>
+            <TextBlock Text="{Binding PixelScaleText}" Classes="muted small" Margin="0,6,0,0" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Grid ColumnDefinitions="*,*">
+        <Border Classes="card" Margin="0,0,14,0">
+          <StackPanel>
+            <TextBlock Text="Limits (alt-az, no northern sky)" Classes="h2" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Max altitude (keyhole, °)" /><NumericUpDown Value="{Binding Draft.MaxAltitudeDegrees}" Minimum="30" Maximum="90" Increment="1" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Min altitude (°)" /><NumericUpDown Value="{Binding Draft.MinAltitudeDegrees}" Minimum="0" Maximum="60" Increment="1" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Blocked from azimuth (°)" /><NumericUpDown Value="{Binding Draft.NorthBlockedFromAzimuth}" Minimum="0" Maximum="360" Increment="5" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="… through north to (°)" /><NumericUpDown Value="{Binding Draft.NorthBlockedToAzimuth}" Minimum="0" Maximum="360" Increment="5" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Field-rotation blur (px)" /><NumericUpDown Value="{Binding Draft.FieldRotationBlurPixels}" Minimum="0.1" Maximum="10" Increment="0.1" FormatString="0.0" /></StackPanel>
+          </StackPanel>
+        </Border>
+        <Border Classes="card" Grid.Column="1">
+          <StackPanel>
+            <TextBlock Text="Camera and focuser" Classes="h2" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Gain" /><NumericUpDown Value="{Binding Draft.Gain}" Minimum="0" Maximum="600" Increment="10" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Offset" /><NumericUpDown Value="{Binding Draft.Offset}" Minimum="0" Maximum="255" Increment="1" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Cooling setpoint (°C)" /><NumericUpDown Value="{Binding Draft.CoolingTargetCelsius}" Minimum="-20" Maximum="25" Increment="1" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Warm-up rate (°C/min)" /><NumericUpDown Value="{Binding Draft.WarmupRateCelsiusPerMinute}" Minimum="0.5" Maximum="10" Increment="0.5" FormatString="0.0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Focuser speed (1-4)" /><NumericUpDown Value="{Binding Draft.FocuserSpeed}" Minimum="1" Maximum="4" Increment="1" FormatString="0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Nudge small / large (ms)" Width="150" /><NumericUpDown Value="{Binding Draft.FocuserSmallNudgeMs}" Minimum="10" Maximum="5000" Increment="10" FormatString="0" Width="120" /><NumericUpDown Value="{Binding Draft.FocuserLargeNudgeMs}" Minimum="10" Maximum="30000" Increment="50" FormatString="0" Width="120" /></StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Border Classes="card">
+        <StackPanel>
+          <TextBlock Text="Laptop at the scope" Classes="h2" />
+          <CheckBox Name="KeepSystemAwake" IsChecked="{Binding Draft.KeepSystemAwake}" Content="Keep the Mac from idle-sleeping while devices are connected" />
+          <CheckBox IsChecked="{Binding Draft.KeepDisplayAwake}" Content="Keep the display on" />
+          <CheckBox IsChecked="{Binding Draft.PreventAppNap}" Content="Prevent App Nap (keeps exposure timing and serial I/O responsive in the background)" />
+          <CheckBox IsChecked="{Binding Draft.NightVision}" Content="Night vision (red) theme" />
+          <TextBlock Text="Closing the lid on battery still sleeps the Mac; macOS gives apps no way to prevent that." Classes="muted small" TextWrapping="Wrap" Margin="0,4,0,0" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="4">
+          <TextBlock Text="Storage" Classes="h2" />
+          <StackPanel Classes="row">
+            <TextBlock Classes="label" Text="Images folder" />
+            <TextBox Name="ImagesRoot" Text="{Binding ImagesRootText}" PlaceholderText="{Binding DefaultImagesRoot}" Width="460" />
+          </StackPanel>
+          <TextBlock Name="StorageWarning" Text="{Binding StorageWarning}" Classes="warn" TextWrapping="Wrap" IsVisible="{Binding StorageWarning, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <TextBlock Classes="muted small"><Run Text="Settings: " /><Run Text="{Binding SettingsFile}" /></TextBlock>
+          <TextBlock Classes="muted small"><Run Text="Logs: " /><Run Text="{Binding LogsDirectory}" /></TextBlock>
+          <TextBlock Classes="muted small"><Run Text="Resources: " /><Run Text="{Binding ResourcesDirectory}" /></TextBlock>
+          <TextBlock Classes="muted small"><Run Text="Native libraries: " /><Run Text="{Binding FrameworksDirectory}" /></TextBlock>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card" IsVisible="{Binding DevicesSimulated}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="Simulator" Classes="h2" />
+          <TextBlock Text="Exercise the connection-lost banner and reconnect without unplugging anything." Classes="muted small" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Name="SimulateCameraLoss" Content="Unplug camera (simulated)" Command="{Binding SimulateCameraLossCommand}" />
+            <Button Name="SimulateMountLoss" Content="Unplug mount cable (simulated)" Command="{Binding SimulateMountLossCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <views:AboutView DataContext="{Binding About}" />
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

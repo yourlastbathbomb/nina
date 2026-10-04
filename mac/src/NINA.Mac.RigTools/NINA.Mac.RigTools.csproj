@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Rig-specific planning maths NINA lacks (MAC_PORT_PLAN.md section 6, decisions 4-5): alt-az field
+    rotation and max sub length, LST/alt-az/transit, a horizon parser that tolerates inline comments,
+    and a night planner. Pure managed code: no SOFA/NOVAS, no engine projects, no NuGet packages.
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.RigTools</RootNamespace>
+    <AssemblyName>NINA.Mac.RigTools</AssemblyName>
+  </PropertyGroup>
+
+  <!-- The rigplan CLI lives in a nested project; keep its sources and build output out of this one -->
+  <ItemGroup>
+    <Compile Remove="rigplan/**" />
+    <None Remove="rigplan/**" />
+    <EmbeddedResource Remove="rigplan/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.RigTools.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Horizon/DeepWaterBay.placeholder.hrz" LogicalName="NINA.Mac.RigTools.Horizon.DeepWaterBay.placeholder.hrz" />
+  </ItemGroup>
+
+</Project>

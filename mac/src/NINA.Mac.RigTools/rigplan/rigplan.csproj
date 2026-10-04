@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rigplan: prints tonight's imaging windows and field-rotation limits for the rig -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NINA.Mac.RigTools.Cli</RootNamespace>
+    <AssemblyName>rigplan</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.RigTools.csproj" />
+  </ItemGroup>
+
+</Project>

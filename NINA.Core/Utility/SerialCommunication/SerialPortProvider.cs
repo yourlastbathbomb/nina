@@ -18,6 +18,7 @@ using System.Collections.ObjectModel;
 using System.IO.Ports;
 using System.Linq;
 using System.Management;
+using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 
 namespace NINA.Core.Utility.SerialCommunication {
@@ -39,6 +40,10 @@ namespace NINA.Core.Utility.SerialCommunication {
 
         public SerialPortProvider() {
             dtrEnableValue = new Dictionary<string, bool>();
+            if (!OperatingSystem.IsWindows()) {
+                // WMI is Windows-only; the Arduino Leonardo DTR detection below depends on it
+                return;
+            }
             var searcher = new ManagementObjectSearcher(ALL_SERIAL_PORTS_QUERY);
             foreach (var entry in searcher.Get()) {
                 var com = Regex.Match((string)entry["Name"], @"COM\d+");
@@ -70,6 +75,9 @@ namespace NINA.Core.Utility.SerialCommunication {
         }
 
         public ReadOnlyCollection<string> GetPortNames(string deviceQuery = null, bool addDivider = true, bool addGenericPorts = true) {
+            if (!OperatingSystem.IsWindows()) {
+                return GetPortNamesWithoutWmi(addDivider, addGenericPorts);
+            }
             var result = new List<string>();
             try {
                 if (deviceQuery != null) { result.AddRange(GetComPortsForQuery(deviceQuery).OrderBy(s => s)); }
@@ -86,6 +94,22 @@ namespace NINA.Core.Utility.SerialCommunication {
             return new ReadOnlyCollection<string>(result);
         }
 
+        /// <summary>
+        /// Without WMI the device-specific query cannot run, so only the generic ports are listed.
+        /// macOS lists every serial device twice; only the callout node (/dev/cu.*) opens without waiting for carrier detect.
+        /// </summary>
+        private static ReadOnlyCollection<string> GetPortNamesWithoutWmi(bool addDivider, bool addGenericPorts) {
+            var result = new List<string>();
+            if (addDivider) { result.Add("----"); }
+            if (addGenericPorts) {
+                result.AddRange(SerialPort.GetPortNames()
+                    .Where(s => !OperatingSystem.IsMacOS() || s.StartsWith("/dev/cu.", StringComparison.Ordinal))
+                    .OrderBy(s => s));
+            }
+            return new ReadOnlyCollection<string>(result);
+        }
+
+        [SupportedOSPlatform("windows")]
         private IEnumerable<string> GetComPortsForQuery(string query) {
             var result = new List<string>();
             var searcher = new ManagementObjectSearcher(query);

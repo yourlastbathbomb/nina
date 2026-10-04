@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Siril output side of the macOS port (MAC_PORT_PLAN.md section 6 "Siril output", decisions 7 and 8):
+    per-night folder layout, master-dark library named with Siril header tokens, Siril script
+    generator (OSC_Preprocessing equivalent) and a siril-cli runner that never touches the user's
+    Siril GUI configuration. Pure managed code; no upstream sources and no other mac/ projects.
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.Siril</RootNamespace>
+    <AssemblyName>NINA.Mac.Siril</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.Siril.Test" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,104 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:NINA.Mac.App.ViewModels"
+        x:Class="NINA.Mac.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="{Binding Title}"
+        Width="1280" Height="800" MinWidth="1024" MinHeight="680"
+        WindowStartupLocation="CenterScreen">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <!-- Connection-lost banner -->
+    <Border Grid.Row="0" Name="Banner" IsVisible="{Binding Banner.IsVisible}" Background="{DynamicResource BannerBackgroundBrush}" Padding="16,10">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="2">
+          <TextBlock Text="Connection lost" FontWeight="SemiBold" Foreground="{DynamicResource BannerTextBrush}" />
+          <TextBlock Text="{Binding Banner.Message}" TextWrapping="Wrap" Foreground="{DynamicResource BannerTextBrush}" />
+          <TextBlock Text="{Binding Banner.ReconnectError}" IsVisible="{Binding Banner.ReconnectError, Converter={x:Static ObjectConverters.IsNotNull}}" TextWrapping="Wrap" Foreground="{DynamicResource BannerTextBrush}" />
+        </StackPanel>
+        <Button Grid.Column="1" Name="ReconnectButton" Content="Reconnect" Classes="accent" VerticalAlignment="Center" Command="{Binding Banner.ReconnectCommand}" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="232,*">
+
+      <!-- Sidebar: the night in order -->
+      <Border Grid.Column="0" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Margin="18,18,18,12" Spacing="2">
+            <TextBlock Text="{Binding About.Info.ShortName}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="ASI585MC · LX200GPS alt-az" Classes="muted small" />
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Margin="12,8,12,16" Spacing="6">
+            <ToggleButton Name="NightVisionToggle" HorizontalAlignment="Stretch" IsChecked="{Binding IsNightVision, Mode=OneWay}" Command="{Binding ToggleNightVisionCommand}">
+              <TextBlock Text="Night vision (red)" />
+            </ToggleButton>
+            <ToggleButton Name="SettingsButton" HorizontalAlignment="Stretch" IsChecked="{Binding IsSettingsSelected, Mode=OneWay}" Command="{Binding OpenSettingsCommand}">
+              <TextBlock Text="Settings" />
+            </ToggleButton>
+            <Button Name="AboutButton" HorizontalAlignment="Stretch" Command="{Binding ShowAboutCommand}">
+              <TextBlock Text="About" />
+            </Button>
+          </StackPanel>
+          <ListBox Name="Nav" Classes="nav" ItemsSource="{Binding NightPages}" SelectedItem="{Binding SidebarSelection}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:PageViewModel">
+                <Grid ColumnDefinitions="28,*">
+                  <TextBlock Text="{Binding Step}" Classes="muted" FontSize="16" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Subtitle}" Classes="muted small" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+
+      <!-- Page -->
+      <DockPanel Grid.Column="1" Margin="28,20,28,12">
+        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,14">
+          <TextBlock Name="PageTitle" Text="{Binding CurrentPage.Title}" Classes="h1" />
+          <TextBlock Text="{Binding CurrentPage.Subtitle}" Classes="muted" />
+          <Border Classes="errorbox" Margin="0,8,0,0" IsVisible="{Binding CurrentPage.HasError}">
+            <TextBlock Text="{Binding CurrentPage.ErrorMessage}" Classes="error" TextWrapping="Wrap" />
+          </Border>
+        </StackPanel>
+        <ContentControl Name="PageHost" Content="{Binding CurrentPage}" />
+      </DockPanel>
+    </Grid>
+
+    <!-- Status bar -->
+    <Border Grid.Row="2" Background="{DynamicResource SidebarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="14,6">
+      <Grid ColumnDefinitions="*,Auto">
+        <WrapPanel Name="StatusBar" Orientation="Horizontal">
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,22,0" ToolTip.Tip="{Binding StatusBar.Camera.StateText}">
+            <Ellipse Classes="dot" Classes.connected="{Binding StatusBar.Camera.IsConnected}" Classes.busy="{Binding StatusBar.Camera.IsConnecting}" Classes.lost="{Binding StatusBar.Camera.IsLost}" />
+            <TextBlock Text="Camera" FontWeight="SemiBold" />
+            <TextBlock Name="CameraStatus" Text="{Binding StatusBar.Camera.Detail}" Classes="muted" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,22,0" ToolTip.Tip="{Binding StatusBar.Mount.StateText}">
+            <Ellipse Classes="dot" Classes.connected="{Binding StatusBar.Mount.IsConnected}" Classes.busy="{Binding StatusBar.Mount.IsConnecting}" Classes.lost="{Binding StatusBar.Mount.IsLost}" />
+            <TextBlock Text="Mount" FontWeight="SemiBold" />
+            <TextBlock Name="MountStatus" Text="{Binding StatusBar.Mount.Detail}" Classes="muted" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,22,0" ToolTip.Tip="{Binding StatusBar.Focuser.StateText}">
+            <Ellipse Classes="dot" Classes.connected="{Binding StatusBar.Focuser.IsConnected}" Classes.busy="{Binding StatusBar.Focuser.IsConnecting}" Classes.lost="{Binding StatusBar.Focuser.IsLost}" />
+            <TextBlock Text="Focuser" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding StatusBar.Focuser.Detail}" Classes="muted" />
+          </StackPanel>
+          <TextBlock Name="SessionStatus" Text="{Binding StatusBar.SessionText}" Classes="muted" Margin="0,0,22,0" VerticalAlignment="Center" />
+        </WrapPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="18">
+          <TextBlock Text="{Binding StatusBar.SimulationNote}" Classes="warn small" VerticalAlignment="Center" />
+          <TextBlock Name="KeepAwakeStatus" Text="{Binding StatusBar.KeepAwakeText}" Classes="muted" VerticalAlignment="Center" />
+          <TextBlock Name="PowerStatus" Text="{Binding StatusBar.PowerText}" Classes.warn="{Binding StatusBar.IsPowerLow}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

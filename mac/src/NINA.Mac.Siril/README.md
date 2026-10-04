@@ -1,0 +1,103 @@
+# NINA.Mac.Siril
+
+This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` section 6 ("Siril output") and decisions 7 (calibration) and 8 (Siril). It is a managed class library with no upstream sources and no references to other `mac/` projects, and the engine is meant to call it later. Tests live in `mac/tests/NINA.Mac.Siril.Test`.
+
+| Type | What it does |
+|---|---|
+| `SessionLayout` | Builds the per-night folder tree and routes each frame (`FrameInfo`) to its folder and file name |
+| `NinaFilePatterns` | NINA profile file patterns that write the same tree. Also a port of `ImagePatterns.GetImageFileString` with the proposed upstream fix (split on `/` and `\`, plus `$$IMAGETYPEDIR$$`) |
+| `SirilPathTemplate` | Siril 1.4 header tokens (`$EXPTIME:%d$`, `%f`, `%s`, `dmN`), resolved the same way siril-cli resolves them |
+| `DarkLibrary` | Scans the raw-dark sets and builds masters with siril-cli. Siril names each master from the token template |
+| `SirilScriptGenerator` | Generates a per-target script equivalent to `OSC_Preprocessing` v1.4, or `OSC_Extract_HaOIII` v1.5 on dual-band nights |
+| `SirilSessionValidator` | Runs the checks Siril skips: one exposure/gain/offset/set-point/binning per lights folder, BAYERPAT present, sizes match, the master exists, no stray JPEG/TIFF files |
+| `SirilRunner` | Runs `siril-cli -o -i <own ini> -d <dir> -s <script>`, captures the log, detects failure and parses `Error in line N` and missing files |
+| `SirilPreprocessor` | Validate, then generate, then clean `process/`, then run, then collect `result_*.fit` |
+
+## Layout (defaults)
+
+```
+~/Astro/NINA/                        root (outside the iCloud-synced ~/Documents, research SIR-15)
+  2026-10-03/                        night = local date of (exposure start - 12 h), Asia/Hong_Kong
+    flats/  biases/                  night-level frames taken without a target (fallback for every target)
+    NGC 253/                         Siril working directory of one target
+      lights/                        LIGHT only, top level, names start with the date-time
+      flats/                         FLAT
+      biases/                        dark flats (preferred) or biases; calibrate the flats only
+      snapshots/                     SNAPSHOT, never stacked
+      masters/ process/              Siril output; process/ holds symlinks and is cleaned before each run
+      nina_siril.ssf  siril_*.log  result_<LIVETIME>s.fit
+  library/
+    darks/20.00s_g252_o50_0.00C_2x2/ raw darks, one folder per exposure/gain/offset/set-point/binning
+    masters/dark_20s_G252_O50_T0_B2.fit
+```
+
+- **Night rollover.** The night changes at local noon (HKT), like NINA's `$$DATEMINUS12$$`, not at midnight.
+- **Dark flats.** NINA 3 types dark flats as `DARK`. The engine must set `FrameInfo.IsDarkFlat` so they go to `biases/`.
+- **Master-dark template.** The template is `dark_$EXPTIME:%d$s_G$GAIN:%d$_O$OFFSET:%d$_T$SET-TEMP:%d$_B$XBINNING:%d$.fit`.
+  - Lights are calibrated with `"-dark=<library>/masters/<template>"`. Siril fills the tokens from the first light's header.
+  - If no master matches, Siril stops the script at `calibrate` (exit code 1). The validator reports the same problem before the run.
+- **Default script choices:**
+  - Master dark from the library.
+  - Flats calibrated with the master of `biases/`.
+  - Registration on the middle frame (`setref` followed by one-pass `register`), which keeps the mid-session orientation for alt-az.
+  - Stacking: `stack rej 3 3 -norm=addscale -output_norm -rgb_equal -32b`, then `mirrorx -bottomup`.
+- **Script options:**
+  - `FlatCalibration.SyntheticOffset`: uses `"-bias==N*$OFFSET"`. Measure N once from biases.
+  - `RegistrationReference.TwoPass` with `Framing.Min/Max/Cog`.
+  - `DarkSource.Folder`: the stock darks/ step.
+  - `ProcessingMode.HaOIII`.
+- **siril-cli config.** siril-cli writes `wd=` and every `set` into the ini it loaded. The runner therefore copies the GUI config (`~/Library/Application Support/org.siril.Siril/siril/config.1.4.ini`, read only) to `~/Library/Application Support/NINA-mac/siril/siril-cli.ini` before each run and passes that copy with `-i`.
+- **Pinned extension.** Scripts start with `setext fit` so that master names do not depend on the user's extension preference.
+
+## Siril 1.4.4 behaviour verified here (siril-cli on this Mac)
+
+- **`%d` truncates.** It casts with C `(int)`, so `EXPTIME = 19.99` gives `19s` and `SET-TEMP = -0.6` gives `T0`. The C# resolver matches `parse -r` output exactly for 16 cases (`SirilParityTest`).
+- **`$DATE-OBS:dm12$` uses UTC.** In HKT it therefore rolls over at 20:00, not at noon. Use `$DATE-LOC:dm12$` when you need the local night.
+- **`%s` drops apostrophes.** Siril shell-unquotes the raw FITS string, so `'Thor''s Helmet'` becomes `Thors_Helmet`.
+- **A script without a leading `requires` is skipped.** siril-cli still prints "Script execution finished successfully" and exits 0, so the runner refuses such scripts.
+- **`-i` must name an existing file.** siril-cli exits 1 if the file is missing. An empty file gives Siril's defaults.
+- **`seqextract_HaOIII -resample=ha` upsamples Ha to full frame size.** The research (SIR-14) said the result would be half size. On the test data, both Ha and OIII results came out at the light-frame size.
+- **Stock-mode output matches the stock script exactly.** With stock folders, the generated script produces a stack identical (max difference 0) to the installed `OSC_Preprocessing.ssf`.
+
+## Build and test
+
+Use the repo's .NET 10 wrapper. Plain `dotnet` is .NET 8 and fails.
+
+```bash
+mac/dotnet build mac/tests/NINA.Mac.Siril.Test/NINA.Mac.Siril.Test.csproj
+mac/dotnet test  mac/tests/NINA.Mac.Siril.Test/NINA.Mac.Siril.Test.csproj
+```
+
+- **Siril tests.** Tests that need Siril run `/Applications/Siril.app/Contents/MacOS/siril-cli` and are ignored when it is missing.
+- **Temp files.** Everything runs in `$TMPDIR/nina-mac-siril-tests/`, in paths containing spaces. Set `NINA_SIRIL_KEEP=1` to keep the files for inspection.
+- **Siril configuration.** The tests never read or write the Siril GUI configuration, except one runner test. That test copies the configuration and asserts that the original's hash and mtime are unchanged.
+- **End-to-end test (`EndToEndTest`).** It writes a synthetic night through `SessionLayout`, then builds the dark library with siril-cli, then runs the generated scripts. It measures:
+  - The flux ratio of a corner star to a centre star.
+  - The background offsets between corner and centre, and between left and right, in the stack.
+  - The R/G/B sky ratios and flatness in the calibrated lights.
+  - The same metrics for an uncalibrated control run.
+  - Synthetic-offset and two-pass/min variants.
+  - Ha/OIII output.
+  - Aborts on exposure and gain mismatch.
+  - Equivalence with the stock script.
+
+## Use from the engine
+
+```csharp
+var layout = new SessionLayout(new SessionLayoutOptions());           // ~/Astro/NINA, HKT
+var path = layout.GetFramePath(frameInfo);                            // where to save a frame
+var runner = new SirilRunner();                                       // own ini, GUI config only read
+await layout.Library.BuildMastersAsync(runner);                       // missing/stale masters
+var plan = SirilPreprocessingPlan.ForTarget(layout.GetTargetFolders(night, "NGC 253"), layout.Library);
+var result = await SirilPreprocessor.RunAsync(plan, runner);          // result.Issues, result.Run.Summary, result.Results
+```
+
+## Status
+
+- **Done:** library and tests, built with 0 warnings. All tests pass against siril-cli 1.4.4, using synthetic frames only.
+- **Not done:**
+  - The library is not wired into the engine and is not listed in `mac/NINA.Mac.slnx`. The owner of the slnx should add both projects.
+  - It has not been tried on real ASI585MC frames.
+  - `-fitseq` for more than 9000 lights is not implemented. The validator only warns.
+  - Drizzle is not implemented.
+- **Upstream proposal.** The fix for `/` vs `\` separators and the `$$IMAGETYPEDIR$$` token are described in the task report as a proposed upstream patch. No upstream file is changed.

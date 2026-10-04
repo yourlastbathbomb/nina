@@ -33,12 +33,14 @@ if [[ ! -f "$libusb_src" ]]; then
     exit 1
 fi
 
-rm -rf "$stage"
+# The stage dir is shared with other scripts (e.g. build-astrometry-natives.sh): replace only our files.
+own=(libASICamera2.dylib libusb-1.0.0.dylib ZWO-LICENSE.txt)
 mkdir -p "$stage"
+for f in "${own[@]}"; do rm -f "$stage/$f"; done
 cp "$asi" "$stage/libASICamera2.dylib"
 cp -L "$libusb_src" "$stage/libusb-1.0.0.dylib"
 cp "$src/license.txt" "$stage/ZWO-LICENSE.txt"
-chmod u+w "$stage"/*.dylib
+chmod u+w "$stage/libASICamera2.dylib" "$stage/libusb-1.0.0.dylib"
 
 old_usb="$(otool -L "$stage/libASICamera2.dylib" | awk '/libusb-1.0/ {print $1}')"
 install_name_tool -id @rpath/libASICamera2.dylib "$stage/libASICamera2.dylib"
@@ -49,7 +51,7 @@ codesign --force --sign - "$stage/libusb-1.0.0.dylib"
 codesign --force --sign - "$stage/libASICamera2.dylib"
 
 echo "Staged into $stage:"
-for f in "$stage"/*.dylib; do
+for f in "$stage/libASICamera2.dylib" "$stage/libusb-1.0.0.dylib"; do
     echo "  $(basename "$f"): $(lipo -archs "$f")"
     otool -L "$f" | tail -n +2 | sed 's/^/      /'
 done

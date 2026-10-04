@@ -27,9 +27,15 @@ namespace NINA.Mac.Native {
     /// </summary>
     public static class NativeLibraries {
 
+        /// <summary>
+        /// DllImport name, without a trailing ".dll", to dylib file name. "X.dll" and "X" both map to the same entry.
+        /// </summary>
         private static readonly Dictionary<string, string> dylibByImportName = new(StringComparer.OrdinalIgnoreCase) {
-            ["ASICamera2.dll"] = "libASICamera2.dylib",
+            // ZWO ASI camera SDK (mac/scripts/stage-zwo.sh)
             ["ASICamera2"] = "libASICamera2.dylib",
+            // IAU SOFA and USNO NOVAS 3.1 for NINA.Astrometry SOFA.cs / NOVAS.cs (mac/scripts/build-astrometry-natives.sh)
+            ["SOFA_2023_10_11"] = "libsofa.dylib",
+            ["NOVAS31lib"] = "libnovas31.dylib",
         };
 
         private static readonly HashSet<Assembly> registered = new();
@@ -51,9 +57,19 @@ namespace NINA.Mac.Native {
             yield return Path.GetFullPath(Path.Combine(baseDir, "..", "Frameworks"));
         }
 
+        /// <summary>File name of the dylib mapped to <paramref name="importName"/> ("X.dll" or "X"), or null if unmapped.</summary>
+        public static string DylibName(string importName) {
+            if (importName == null) {
+                return null;
+            }
+            var bareName = importName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? importName[..^4] : importName;
+            return dylibByImportName.TryGetValue(bareName, out var fileName) ? fileName : null;
+        }
+
         /// <summary>Full path of the dylib that would be loaded for <paramref name="importName"/>, or null if unmapped or missing.</summary>
         public static string Locate(string importName) {
-            if (!dylibByImportName.TryGetValue(importName, out var fileName)) {
+            var fileName = DylibName(importName);
+            if (fileName == null) {
                 return null;
             }
             foreach (var dir in SearchDirectories()) {
@@ -66,13 +82,14 @@ namespace NINA.Mac.Native {
         }
 
         private static IntPtr Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath) {
-            if (!dylibByImportName.ContainsKey(libraryName)) {
+            var fileName = DylibName(libraryName);
+            if (fileName == null) {
                 // Not ours: fall back to the runtime's default probing
                 return IntPtr.Zero;
             }
             var path = Locate(libraryName);
             if (path == null) {
-                throw new DllNotFoundException($"{dylibByImportName[libraryName]} (for {libraryName}) not found in: {string.Join(", ", SearchDirectories())}");
+                throw new DllNotFoundException($"{fileName} (for {libraryName}) not found in: {string.Join(", ", SearchDirectories())}");
             }
             return NativeLibrary.Load(path);
         }

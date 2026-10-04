@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M2: Autostar II (LX200GPS 4.2g) protocol simulator over any Stream, with quirks for the bench unknowns.
+    As an executable (lx200sim) it serves the simulator on a pseudo-terminal so lx200probe can be driven
+    end-to-end through System.IO.Ports.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NINA.Mac.Lx200.Sim</RootNamespace>
+    <AssemblyName>lx200sim</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
+  </ItemGroup>
+
+</Project>

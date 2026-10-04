@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             xmlns:controls="using:NINA.Mac.App.Controls"
+             x:Class="NINA.Mac.App.Views.CoolView"
+             x:DataType="vm:CoolViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <Grid RowDefinitions="Auto,*" ColumnDefinitions="340,*" MaxWidth="1100" HorizontalAlignment="Left">
+    <Border Classes="card" Grid.Row="0" Grid.Column="0" Margin="0,0,14,14">
+      <StackPanel Spacing="10">
+        <TextBlock Text="Sensor" Classes="muted" />
+        <TextBlock Name="SensorTemperature" Text="{Binding SensorTemperatureText}" Classes="big" />
+        <TextBlock Text="Cooler power" Classes="muted" />
+        <ProgressBar Name="CoolerPower" Value="{Binding CoolerPower}" Minimum="0" Maximum="100" Height="10" />
+        <TextBlock Text="{Binding CoolerPower, StringFormat='{}{0:0} %'}" Classes="muted small" />
+        <TextBlock Name="CoolStatus" Text="{Binding StatusText}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card" Grid.Row="0" Grid.Column="1" Margin="0,0,0,14">
+      <StackPanel Spacing="10">
+        <TextBlock Text="Setpoint" Classes="h2" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <NumericUpDown Name="TargetTemperature" Value="{Binding TargetTemperature}" Minimum="-20" Maximum="25" Increment="1" FormatString="0" Width="140" />
+          <TextBlock Text="°C" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Text="0 °C matches the dark library. The ASI585MC Pro cools to about 35 °C below ambient." Classes="muted small" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+          <Button Name="StartCoolingButton" Classes="accent" Content="Cool" Command="{Binding StartCoolingCommand}" IsEnabled="{Binding IsConnected}" />
+          <Button Name="WarmUpButton" Content="Warm up and switch off" Command="{Binding WarmUpCommand}" IsEnabled="{Binding CoolerOn}" />
+          <Button Content="Stop warm-up" Command="{Binding StopWarmUpCommand}" IsVisible="{Binding IsWarming}" />
+        </StackPanel>
+        <TextBlock Classes="muted small" TextWrapping="Wrap">
+          <Run Text="Warm-up ramps the setpoint at" />
+          <Run Text="{Binding WarmupRate, StringFormat='{}{0:0.#} °C/min'}" />
+          <Run Text="to avoid condensation in humid Hong Kong nights." />
+        </TextBlock>
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card" Grid.Row="1" Grid.ColumnSpan="2">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="Sensor temperature (°C), last 15 minutes" Classes="h2" />
+        <controls:Sparkline Name="TemperatureChart" Values="{Binding History}" MinHeight="160" />
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

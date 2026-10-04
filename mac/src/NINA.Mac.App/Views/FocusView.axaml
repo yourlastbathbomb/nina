@@ -1,0 +1,96 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             xmlns:controls="using:NINA.Mac.App.Controls"
+             x:Class="NINA.Mac.App.Views.FocusView"
+             x:DataType="vm:FocusViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <Grid ColumnDefinitions="*,380" RowDefinitions="Auto,*" MaxWidth="1200" HorizontalAlignment="Left">
+
+    <!-- Live frame statistics -->
+    <Border Classes="card" Grid.Column="0" Margin="0,0,14,14">
+      <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,*,*">
+          <StackPanel>
+            <TextBlock Text="HFR" Classes="muted" />
+            <TextBlock Name="Hfr" Text="{Binding HfrText, FallbackValue='—', TargetNullValue='—'}" Classes="big" />
+            <TextBlock Text="{Binding BestHfrText}" Classes="muted small" />
+          </StackPanel>
+          <StackPanel Grid.Column="1">
+            <TextBlock Text="Bahtinov offset" Classes="muted" />
+            <TextBlock Name="Bahtinov" Text="{Binding BahtinovText, TargetNullValue='—'}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="simulated until M5" Classes="muted small" />
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="Stars" Classes="muted" />
+            <TextBlock Text="{Binding StarsText, TargetNullValue='—'}" FontSize="18" FontWeight="SemiBold" />
+          </StackPanel>
+        </Grid>
+        <ProgressBar Value="{Binding ExposureProgress}" Minimum="0" Maximum="1" Height="6" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBlock Text="Exposure" VerticalAlignment="Center" Classes="muted" />
+          <NumericUpDown Value="{Binding ExposureSeconds}" Minimum="0.1" Maximum="30" Increment="0.5" FormatString="0.0" Width="120" />
+          <TextBlock Text="s   Gain" VerticalAlignment="Center" Classes="muted" />
+          <NumericUpDown Value="{Binding Gain}" Minimum="0" Maximum="600" Increment="10" FormatString="0" Width="120" />
+          <Button Name="TakeOneButton" Content="Take one" Command="{Binding TakeOneCommand}" IsEnabled="{Binding CameraReady}" />
+          <ToggleButton Name="LoopButton" Content="Loop" IsChecked="{Binding IsLooping, Mode=OneWay}" Command="{Binding ToggleLoopCommand}" IsEnabled="{Binding CameraReady}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Timed focuser -->
+    <Border Classes="card" Grid.Column="1" Grid.RowSpan="2">
+      <StackPanel Spacing="12">
+        <TextBlock Text="#1209 timed focuser" Classes="h2" />
+        <StackPanel>
+          <TextBlock Text="Virtual position" Classes="muted" />
+          <TextBlock Name="FocuserPosition" Text="{Binding Position, StringFormat='{}{0} ms'}" Classes="big" />
+          <TextBlock Text="Milliseconds of motor time at the selected speed. There is no real position readout." Classes="muted small" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Spacing="6">
+          <TextBlock Text="Speed" Classes="muted" />
+          <ListBox Name="SpeedPicker" ItemsSource="{Binding SpeedOptions}" SelectedItem="{Binding SelectedSpeed}" IsEnabled="{Binding FocuserReady}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="4" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="x:Int32">
+                <TextBlock Text="{Binding}" MinWidth="40" TextAlignment="Center" FontWeight="SemiBold" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+        <StackPanel Spacing="6">
+          <TextBlock Text="Nudge" Classes="muted" />
+          <Grid ColumnDefinitions="*,*,*,*" IsEnabled="{Binding FocuserReady}">
+            <Button Grid.Column="0" Name="InLarge" Classes="nudge" Margin="0,0,4,0" Command="{Binding MoveInLargeCommand}" Content="{Binding LargeNudgeMs, StringFormat='« {0}'}" ToolTip.Tip="Move in (ms)" />
+            <Button Grid.Column="1" Name="InSmall" Classes="nudge" Margin="0,0,4,0" Command="{Binding MoveInSmallCommand}" Content="{Binding SmallNudgeMs, StringFormat='‹ {0}'}" ToolTip.Tip="Move in (ms)" />
+            <Button Grid.Column="2" Name="OutSmall" Classes="nudge" Margin="0,0,4,0" Command="{Binding MoveOutSmallCommand}" Content="{Binding SmallNudgeMs, StringFormat='{}{0} ›'}" ToolTip.Tip="Move out (ms)" />
+            <Button Grid.Column="3" Name="OutLarge" Classes="nudge" Command="{Binding MoveOutLargeCommand}" Content="{Binding LargeNudgeMs, StringFormat='{}{0} »'}" ToolTip.Tip="Move out (ms)" />
+          </Grid>
+          <StackPanel Orientation="Horizontal" Spacing="6" IsEnabled="{Binding FocuserReady}">
+            <Button Content="In" Command="{Binding MoveInCustomCommand}" />
+            <NumericUpDown Value="{Binding CustomMs}" Minimum="10" Maximum="30000" Increment="100" FormatString="0" Width="130" />
+            <TextBlock Text="ms" VerticalAlignment="Center" />
+            <Button Content="Out" Command="{Binding MoveOutCustomCommand}" />
+          </StackPanel>
+          <TextBlock Text="moving…" Classes="warn small" IsVisible="{Binding IsMoving}" />
+        </StackPanel>
+        <Button Name="RecenterButton" Content="Recentre virtual position" Command="{Binding RecenterVirtualPositionCommand}" IsEnabled="{Binding FocuserReady}" />
+        <TextBlock Text="{Binding PositionNote}" Classes="muted small" TextWrapping="Wrap" />
+        <TextBlock Text="Autofocus is hidden: it needs a focuser that reports position. Focus by eye with the Bahtinov mask and the HFR trend." Classes="muted small" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <Border Classes="card" Grid.Row="1" Grid.Column="0" Margin="0,0,14,0">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="HFR history (px)" Classes="h2" />
+        <controls:Sparkline Name="HfrChart" Values="{Binding HfrHistory}" Format="0.00" MinHeight="160" />
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

@@ -2,15 +2,34 @@
 
   <PropertyGroup>
     <RootNamespace>NINA.Mac.Native</RootNamespace>
+    <MacEphemeris>$(MacRoot)native/ephemeris/JPLEPH</MacEphemeris>
   </PropertyGroup>
 
-  <!-- Staged vendor dylibs (mac/scripts/stage-*.sh) flow to every app/test that references this project -->
+  <!-- Staged vendor dylibs (mac/scripts/stage-*.sh, build-*.sh) flow to every app/test that references this project -->
   <ItemGroup>
     <None Include="$(MacNativeStage)*.dylib;$(MacNativeStage)*.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
+  <!--
+    JPL DE421 ephemeris for NOVAS (the JPLEPH blob from nina.external, kept uncommitted in mac/native/ephemeris).
+    Upstream NOVAS.cs opens Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "External", "JPLEPH"), so it goes to
+    <output>/External/JPLEPH. In an .app bundle BaseDirectory is Contents/MacOS; packaging has to deal with that
+    (data files belong in Contents/Resources).
+  -->
+  <ItemGroup Condition="Exists('$(MacEphemeris)')">
+    <None Include="$(MacEphemeris)" Link="External/JPLEPH" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
   <Target Name="WarnMissingNativeStage" BeforeTargets="Build" Condition="!Exists('$(MacNativeStage)libASICamera2.dylib')">
     <Warning Text="mac/native/stage/libASICamera2.dylib is missing. Run mac/scripts/stage-zwo.sh; ZWO cameras will not load." />
+  </Target>
+
+  <Target Name="WarnMissingAstrometryNatives" BeforeTargets="Build" Condition="!Exists('$(MacNativeStage)libsofa.dylib') Or !Exists('$(MacNativeStage)libnovas31.dylib')">
+    <Warning Text="mac/native/stage/libsofa.dylib or libnovas31.dylib is missing. Run mac/scripts/build-astrometry-natives.sh; SOFA and NOVAS (NINA.Astrometry) will not load." />
+  </Target>
+
+  <Target Name="WarnMissingEphemeris" BeforeTargets="Build" Condition="!Exists('$(MacEphemeris)')">
+    <Warning Text="mac/native/ephemeris/JPLEPH (JPL DE421) is missing; NOVAS will run without its planetary ephemeris." />
   </Target>
 
 </Project>

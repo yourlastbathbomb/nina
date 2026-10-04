@@ -1,0 +1,48 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             x:Class="NINA.Mac.App.Views.TeardownView"
+             x:DataType="vm:TeardownViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <ScrollViewer>
+    <StackPanel Spacing="14" MaxWidth="900" HorizontalAlignment="Left">
+      <Border Classes="card">
+        <StackPanel Spacing="10">
+          <TextBlock Text="End of night, in a safe order" Classes="h2" />
+          <ItemsControl Name="Steps" ItemsSource="{Binding Steps}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeardownStepViewModel">
+                <Grid ColumnDefinitions="22,*,Auto" Margin="0,4">
+                  <Ellipse Classes="dot" VerticalAlignment="Top" Margin="0,4,0,0" Classes.connected="{Binding IsDone}" Classes.busy="{Binding IsRunning}" Classes.lost="{Binding IsFailed}" />
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Title}" />
+                    <TextBlock Text="{Binding Detail}" Classes="muted small" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Text="{Binding StatusText}" Classes="muted" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Name="RunTeardownButton" Classes="accent" Content="Run teardown" Command="{Binding RunTeardownCommand}" IsEnabled="{Binding !IsRunning}" Padding="20,8" />
+            <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" />
+          </StackPanel>
+          <TextBlock Text="Soft park never sends the mount to Dec +89° (the blocked north); it points low in the south and stops tracking." Classes="muted small" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="card">
+        <StackPanel Spacing="6">
+          <TextBlock Text="Tonight's frames" Classes="h2" />
+          <SelectableTextBlock Name="NightFolder" Text="{Binding NightFolder}" Classes="mono" TextWrapping="Wrap" />
+          <TextBlock Text="Stack with Siril 1.4 (OSC_Preprocessing; OSC_Extract_HaOIII for the ALP-T):" Classes="muted small" Margin="0,6,0,0" />
+          <SelectableTextBlock Name="SirilCommand" Text="{Binding SirilCommand}" Classes="mono" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <TextBlock Name="KeepAwake" Text="{Binding KeepAwakeText}" Classes="muted" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,19 @@
+# Deep Water Bay backyard (22.25 N 114.18 E) - azimuth(deg, N=0, E=90)  altitude(deg)
+# PLACEHOLDER - NOT MEASURED. Shape only: northern sky blocked, open to the south over the water.
+# Replace every altitude with a measured value (one point every ~15 deg of azimuth).
+# Comments sit on their own lines so this file also loads in unpatched upstream NINA,
+# which drops any line carrying an inline comment (NINA.Core/Model/CustomHorizon.cs:97-113).
+# Source: research/rig_verify_solve.md, corrected Table 7.
+0     60
+60    60
+# steep edge: two points 0.1 deg apart (interpolation is linear)
+60.1  25
+90    15
+135   6
+# over water
+180   4
+225   6
+270   15
+299.9 25
+300   60
+360   60

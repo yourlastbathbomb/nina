@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Engine smoke tests (NINA.Core / NINA.Profile on macOS) and WpfCompat checks.
+    The WPF oracle tests compare the compat types with the real WPF assemblies from the WindowsDesktop runtime pack
+    (downloaded by NuGet restore, never shipped). See WpfOracle.cs.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Engine.Test</RootNamespace>
+    <WpfRuntimePackVersion>10.0.12</WpfRuntimePackVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <!-- Reads the WPF assemblies and rewrites them as IL-only so they can execute on macOS arm64 (tests only) -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+    <PackageDownload Include="Microsoft.WindowsDesktop.App.Runtime.win-x64" Version="[$(WpfRuntimePackVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>WpfRuntimePackDir</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)microsoft.windowsdesktop.app.runtime.win-x64/$(WpfRuntimePackVersion)/runtimes/win-x64/lib/net10.0/</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NinaRoot</_Parameter1>
+      <_Parameter2>$(NinaRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../../src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+  </ItemGroup>
+
+</Project>

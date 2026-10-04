@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- nina-ia: run the image analysis on FITS files from the command line (sanity checks, benchmarks). -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>nina-ia</AssemblyName>
+    <RootNamespace>NINA.Mac.ImageAnalysis.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.ImageAnalysis.csproj" />
+  </ItemGroup>
+
+</Project>

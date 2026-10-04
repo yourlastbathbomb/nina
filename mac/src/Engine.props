@@ -1,0 +1,126 @@
+<Project>
+  <!--
+    Shared settings for the headless engine projects (NINA.*.Mac). Each engine csproj imports this file
+    explicitly; mac/Directory.Build.props stays the repo-wide mac layer (TFM, RID, NinaRoot).
+
+    Engine projects compile upstream sources by link: <Compile Include="$(NinaRoot)NINA.X/**/*.cs" LinkBase="Upstream" />
+    plus Remove lists grouped by reason. See mac/src/README-engine.md.
+  -->
+  <PropertyGroup>
+    <!-- Upstream supplies assembly attributes through CommonAssemblyInfo.cs and Properties/AssemblyInfo.cs -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Deterministic>true</Deterministic>
+    <IsPackable>false</IsPackable>
+    <!-- Upstream builds a NuGet package on every build; the mac engine never does -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <!-- The engine targets the plain net10.0 TFM, so the SDK's WindowsDesktop/WPF targets must stay out -->
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+
+  <!--
+    Platform inventory (opt-in): upstream's root .editorconfig sets CA1416 (platform compatibility) to none for every
+    .cs file, mac/ included, so a normal build never reports Windows-only API use. Building with
+    -p:MacPlatformInventory=true skips .editorconfig discovery for the compile, so each Windows-only API that upstream calls
+    without an OS guard shows up as a CA1416 warning (upstream style rules are off for that build).
+  -->
+  <PropertyGroup Condition="'$(MacPlatformInventory)' == 'true'">
+    <DiscoverEditorConfigFiles>false</DiscoverEditorConfigFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Every engine assembly carries the upstream version attributes (AssemblyVersion/FileVersion 3.3.0.x) -->
+    <Compile Include="$(NinaRoot)CommonAssemblyInfo.cs" Link="Properties/CommonAssemblyInfo.cs" />
+  </ItemGroup>
+
+  <!--
+    Legacy-encoded upstream sources. Hundreds of upstream .cs files are Windows-1252, not UTF-8. The C# compiler reads a file
+    without a BOM as UTF-8 and, when that fails, falls back to the OS ANSI code page: Windows-1252 on the (Western) Windows
+    machines and CI that build NINA, but UTF-8 with U+FFFD replacement on macOS. A non-ASCII literal in such a file would compile
+    to a different string here, e.g. the degree sign in NINA.Astrometry/FocusTarget.cs (FocusTarget.Information).
+    So before compiling, every Compile item that is neither UTF-8 nor BOM-marked is decoded as Windows-1252 and compiled from a
+    UTF-8 copy in obj/LegacyEncoding/, which gives the Windows build's literals. A leading #line directive keeps diagnostics and
+    debugging on the upstream file. Copies are rewritten only when their content changes.
+  -->
+  <UsingTask TaskName="NinaMacTranscodeWindows1252Sources" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Sources ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <OutputDirectory ParameterType="System.String" Required="true" />
+      <Originals ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+      <Copies ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        // Windows-1252 0x80-0x9F; the five undefined bytes map to the same code point, as .NET's code page 1252 does
+        var c1 = new char[] {
+            '€', '\u0081', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u008D', 'Ž', '\u008F',
+            '\u0090', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u009D', 'ž', 'Ÿ' };
+        var strictUtf8 = new UTF8Encoding(false, true);
+        var originals = new List<ITaskItem>();
+        var copies = new List<ITaskItem>();
+        foreach (var item in Sources) {
+            var path = item.GetMetadata("FullPath");
+            var bytes = File.ReadAllBytes(path);
+            var hasBom = (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                || (bytes.Length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF)));
+            if (hasBom) {
+                continue;
+            }
+            try {
+                strictUtf8.GetString(bytes);
+                continue;
+            } catch (DecoderFallbackException) {
+            }
+            var text = new StringBuilder(bytes.Length + path.Length + 16);
+            text.Append("#line 1 \"").Append(path).Append("\"\n");
+            foreach (var b in bytes) {
+                text.Append(b >= 0x80 && b <= 0x9F ? c1[b - 0x80] : (char)b);
+            }
+            var relative = item.GetMetadata("Link");
+            if (string.IsNullOrEmpty(relative)) {
+                relative = item.GetMetadata("RecursiveDir") + item.GetMetadata("Filename") + item.GetMetadata("Extension");
+            }
+            relative = relative.Replace("..", "__");
+            var copy = Path.GetFullPath(Path.Combine(OutputDirectory, relative));
+            var content = new UTF8Encoding(true).GetPreamble();
+            var body = Encoding.UTF8.GetBytes(text.ToString());
+            var output = new byte[content.Length + body.Length];
+            Buffer.BlockCopy(content, 0, output, 0, content.Length);
+            Buffer.BlockCopy(body, 0, output, content.Length, body.Length);
+            var existing = File.Exists(copy) ? File.ReadAllBytes(copy) : null;
+            var same = existing != null && existing.Length == output.Length;
+            for (var i = 0; same && i < output.Length; i++) {
+                same = existing[i] == output[i];
+            }
+            if (!same) {
+                Directory.CreateDirectory(Path.GetDirectoryName(copy));
+                File.WriteAllBytes(copy, output);
+            }
+            var copyItem = new Microsoft.Build.Utilities.TaskItem(copy);
+            item.CopyMetadataTo(copyItem);
+            copyItem.SetMetadata("NinaMacOriginal", path);
+            originals.Add(item);
+            copies.Add(copyItem);
+        }
+        Originals = originals.ToArray();
+        Copies = copies.ToArray();
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="NinaMacTranscodeWindows1252Sources" BeforeTargets="CoreCompile">
+    <NinaMacTranscodeWindows1252Sources Sources="@(Compile)" OutputDirectory="$(IntermediateOutputPath)LegacyEncoding/">
+      <Output TaskParameter="Originals" ItemName="_NinaMacWindows1252Original" />
+      <Output TaskParameter="Copies" ItemName="_NinaMacWindows1252Copy" />
+    </NinaMacTranscodeWindows1252Sources>
+    <ItemGroup>
+      <Compile Remove="@(_NinaMacWindows1252Original)" />
+      <Compile Include="@(_NinaMacWindows1252Copy)" />
+    </ItemGroup>
+  </Target>
+</Project>

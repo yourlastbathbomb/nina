@@ -1,0 +1,110 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Core compiled for net10.0 / osx-arm64 (headless engine). Upstream files are linked, never copied.
+    Exclusions are grouped by reason; MacReplacements/ holds mac files that take over an excluded file's public API.
+    See ../README-engine.md.
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Core</AssemblyName>
+    <RootNamespace>NINA.Core</RootNamespace>
+    <UpstreamDir>$(NinaRoot)NINA.Core/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+
+    <!-- XAML value converters (IValueConverter / IMultiValueConverter): only XAML bindings use them -->
+    <Compile Remove="$(UpstreamDir)Utility/Converters/**" />
+
+    <!-- XAML validation rules (System.Windows.Controls.ValidationRule) -->
+    <Compile Remove="$(UpstreamDir)Utility/ValidationRules/**" />
+    <Compile Remove="$(UpstreamDir)Utility/ValidationRules.cs" />
+
+    <!-- XAML code-behind, WPF controls, attached properties and visual-tree helpers -->
+    <Compile Remove="$(UpstreamDir)MyMessageBox/MyMessageBoxView.xaml.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/NotificationHostWindow.xaml.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/WindowService/CustomWindow.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/TabControlEx.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/ButtonHelper.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/BindingProxy.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/DataPipes.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/DeferredContent.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/DialogCloser.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Extensions/WPFExtensions.cs" />
+
+    <!-- WPF toast-notification windows; MacReplacements/Notification.cs keeps the static Notification API -->
+    <Compile Remove="$(UpstreamDir)Utility/Notification/Notification.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/NotificationManager.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/CustomNotification.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/INotificationWorkAreaProvider.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/MainWindowWorkAreaProvider.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/PrimaryScreenWorkAreaProvider.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Notification/SameScreenAsApplicationWorkAreaProvider.cs" />
+
+    <!-- WPF dialogs and windows; MacReplacements/ keeps their public API (MyMessageBox.Show, IWindowService) -->
+    <Compile Remove="$(UpstreamDir)MyMessageBox/MyMessageBox.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/WindowService/WindowService.cs" />
+
+    <!-- WPF imaging in UI-only helpers: GeometryGroup icon provider, BitmapSource download (sky survey / astrometry.net preview) -->
+    <Compile Remove="$(UpstreamDir)Model/IImageGeometryProvider.cs" />
+    <Compile Remove="$(UpstreamDir)Utility/Http/HttpDownloadImageRequest.cs" />
+
+    <!-- Windows-only process plumbing: kernel32 CreateProcess / advapi32 launcher for the Windows installer -->
+    <Compile Remove="$(UpstreamDir)Utility/InvokeProcess.cs" />
+
+    <!-- Assembly attributes: upstream adds WPF's ThemeInfo; Properties/AssemblyInfo.Mac.cs carries the rest -->
+    <Compile Remove="$(UpstreamDir)Properties/AssemblyInfo.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Localised strings: NINA.Core.Locale.Locale.resources plus satellite assemblies, as upstream (minus ar-SA, sv-SE) -->
+    <EmbeddedResource Include="$(UpstreamDir)Locale/*.resx" Exclude="$(UpstreamDir)Locale/Locale.ar-SA.resx;$(UpstreamDir)Locale/Locale.sv-SE.resx" LinkBase="Locale" />
+    <EmbeddedResource Include="$(UpstreamDir)Properties/Resources.resx" LinkBase="Properties" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- gRPC/protobuf contract of the out-of-process ASCOM camera service, generated at build time as upstream -->
+    <Protobuf Include="$(UpstreamDir)Protos/API/ASCOM/Camera/CameraService.proto" ProtoRoot="$(UpstreamDir)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.Core.csproj, except where noted -->
+  <ItemGroup>
+    <PackageReference Include="Accord.Math" Version="3.8.2-alpha" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Google.Protobuf" Version="3.35.1" />
+    <PackageReference Include="Google.Protobuf.Tools" Version="3.35.1" />
+    <PackageReference Include="Grpc.Core.Api" Version="2.80.0" />
+    <!--
+      Upstream pins 2.83.0, whose macOS protoc is x86_64-only (runs here only under Rosetta 2; general-purpose Rosetta ends after macOS 27).
+      2.84.0 ships a universal protoc/grpc_csharp_plugin with the same libprotoc 35.1; both generate byte-identical
+      CameraService*.cs (checked 2026-10-04). Build-time only (PrivateAssets=all), so nothing ships differently.
+    -->
+    <PackageReference Include="Grpc.Tools" Version="2.84.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="OxyPlot.Core" Version="2.2.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="SourceGear.sqlite3" Version="3.53.4" />
+    <PackageReference Include="System.ComponentModel.Composition" Version="10.0.10" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+    <PackageReference Include="System.Data.SQLite" Version="2.0.3" />
+    <PackageReference Include="System.Data.SQLite.EF6" Version="2.0.3" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.10" />
+    <!-- Windows-only at run time (WMI); referenced so Logger.cs and SerialPortProvider.cs compile, both guard or catch its use -->
+    <PackageReference Include="System.Management" Version="10.0.10" />
+    <PackageReference Include="System.Runtime.Caching" Version="10.0.10" />
+    <!-- Not in NINA.Core.csproj: on Windows ApplicationSettingsBase comes from the WindowsDesktop framework (UseWPF) -->
+    <PackageReference Include="System.Configuration.ConfigurationManager" Version="10.0.10" />
+  </ItemGroup>
+
+</Project>

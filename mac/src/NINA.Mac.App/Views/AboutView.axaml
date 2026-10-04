@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             x:Class="NINA.Mac.App.Views.AboutView"
+             x:DataType="vm:AboutViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <StackPanel Spacing="6">
+    <TextBlock Name="AppName" Text="{Binding AppName}" Classes="h1" />
+    <TextBlock Name="Version" Text="{Binding VersionText}" Classes="muted" />
+    <TextBlock Name="BasedOn" Text="{Binding BasedOnText}" TextWrapping="Wrap" Margin="0,8,0,0" />
+    <TextBlock Name="License" Text="{Binding LicenseText}" TextWrapping="Wrap" />
+    <TextBlock Text="{Binding DisclaimerText}" Classes="muted" TextWrapping="Wrap" />
+    <TextBlock Text="Third-party components" Classes="h2" Margin="0,10,0,0" />
+    <ItemsControl ItemsSource="{Binding ThirdParty}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="x:String">
+          <TextBlock Text="{Binding}" Classes="muted" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <TextBlock Text="{Binding NoticesText}" Classes="muted small" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

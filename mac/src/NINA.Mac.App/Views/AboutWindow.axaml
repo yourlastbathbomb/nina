@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:NINA.Mac.App.ViewModels"
+        xmlns:views="using:NINA.Mac.App.Views"
+        x:Class="NINA.Mac.App.Views.AboutWindow"
+        x:DataType="vm:AboutViewModel"
+        Title="{Binding AppName, StringFormat='About {0}'}"
+        Width="560" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <DockPanel Margin="24">
+    <Button DockPanel.Dock="Bottom" Name="CloseButton" Content="Close" HorizontalAlignment="Right" Margin="0,16,0,0" Click="OnClose" />
+    <views:AboutView />
+  </DockPanel>
+</Window>

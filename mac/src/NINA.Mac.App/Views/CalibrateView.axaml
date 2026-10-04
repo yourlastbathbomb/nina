@@ -1,0 +1,58 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:NINA.Mac.App.ViewModels"
+             x:Class="NINA.Mac.App.Views.CalibrateView"
+             x:DataType="vm:CalibrateViewModel">
+
+  <!-- Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/ -->
+
+  <ScrollViewer>
+    <StackPanel Spacing="14" MaxWidth="1000" HorizontalAlignment="Left">
+      <Grid ColumnDefinitions="*,*,*">
+        <Border Classes="card" Margin="0,0,14,0">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Flats" Classes="h2" />
+            <TextBlock Text="LED tracing panel on the dew shield. Exposure is found automatically." Classes="muted small" TextWrapping="Wrap" />
+            <TextBlock Text="Frames" Classes="muted small" />
+            <NumericUpDown Value="{Binding FlatCount}" Minimum="1" Maximum="200" Increment="5" FormatString="0" />
+            <TextBlock Text="Target mean (% of full scale)" Classes="muted small" />
+            <NumericUpDown Value="{Binding FlatTargetPercent}" Minimum="10" Maximum="90" Increment="5" FormatString="0" />
+            <Button Name="FlatsButton" Classes="accent" Content="Take flats" Command="{Binding RunFlatsCommand}" IsEnabled="{Binding !IsRunning}" />
+            <TextBlock Text="{Binding FlatsFolder}" Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card" Grid.Column="1" Margin="0,0,14,0">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Dark library" Classes="h2" />
+            <TextBlock Name="DarkNote" Text="{Binding DarkTemperatureNote}" Classes="muted small" TextWrapping="Wrap" />
+            <TextBlock Text="Frames per exposure" Classes="muted small" />
+            <NumericUpDown Value="{Binding DarkCount}" Minimum="1" Maximum="200" Increment="5" FormatString="0" />
+            <TextBlock Text="Exposures (s)" Classes="muted small" />
+            <TextBox Name="DarkExposures" Text="{Binding DarkExposuresText}" />
+            <Button Name="DarksButton" Classes="accent" Content="Take darks" Command="{Binding RunDarksCommand}" IsEnabled="{Binding !IsRunning}" />
+            <TextBlock Text="{Binding DarksFolder}" Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+        <Border Classes="card" Grid.Column="2">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Biases" Classes="h2" />
+            <TextBlock Text="Shortest exposure (32 µs), cap on." Classes="muted small" TextWrapping="Wrap" />
+            <TextBlock Text="Frames" Classes="muted small" />
+            <NumericUpDown Value="{Binding BiasCount}" Minimum="1" Maximum="500" Increment="10" FormatString="0" />
+            <Button Name="BiasesButton" Classes="accent" Content="Take biases" Command="{Binding RunBiasesCommand}" IsEnabled="{Binding !IsRunning}" />
+            <TextBlock Text="{Binding BiasesFolder}" Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Border Classes="card">
+        <StackPanel Spacing="8">
+          <TextBlock Name="CalibrationStatus" Text="{Binding Status}" FontWeight="SemiBold" />
+          <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="1" Height="8" />
+          <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" HorizontalAlignment="Left" />
+          <TextBlock Text="Folders follow Siril's OSC_Preprocessing layout: biases, darks, flats shared per night; lights per target." Classes="muted small" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

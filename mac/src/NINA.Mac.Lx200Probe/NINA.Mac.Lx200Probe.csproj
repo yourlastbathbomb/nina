@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- M2 mount probe: byte-level LX200 console (ports, raw, bench checklist) with an in-process simulator -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NINA.Mac.Lx200Probe</RootNamespace>
+    <AssemblyName>lx200probe</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
+    <ProjectReference Include="../NINA.Mac.Lx200.Sim/NINA.Mac.Lx200.Sim.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.Lx200.Test" />
+  </ItemGroup>
+
+</Project>

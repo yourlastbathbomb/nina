@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Upstream NINA.Profile compiled for net10.0 / osx-arm64 (headless engine). See ../README-engine.md. -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Profile</AssemblyName>
+    <RootNamespace>NINA.Profile</RootNamespace>
+    <UpstreamDir>$(NinaRoot)NINA.Profile/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Every upstream source compiles as is; PluginSettingsTemplate.cs is the checked-in output of its T4 template -->
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.Profile.csproj -->
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

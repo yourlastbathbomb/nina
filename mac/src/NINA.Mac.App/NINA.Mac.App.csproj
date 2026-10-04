@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Native macOS app shell (Avalonia). M8/M9 groundwork: the eight night screens run against simulated
+    device services until the headless engine exists. Packaged by mac/packaging/package-app.sh.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>NINA.Mac.App</RootNamespace>
+    <AssemblyName>NINA.Mac.App</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>0.1.0</Version>
+    <!--
+      Avalonia.BuildServices uploads anonymous build telemetry before CoreCompile when this property is non-empty
+      (set by Avalonia.props). Clearing it here opts this project out; AVALONIA_TELEMETRY_OPTOUT=1 does the same.
+    -->
+    <UsedAvaloniaProducts></UsedAvaloniaProducts>
+  </PropertyGroup>
+
+  <!--
+    App identity. The fork has no name yet and it must not contain "NINA" (MAC_PORT_PLAN.md section 10).
+    AppDisplayName is the single knob: override it with -p:AppDisplayName="..." or here. Everything else is
+    derived: AppShortName drops a parenthetical ("Nightglass (working name)" -> "Nightglass") and names the
+    executable, the data folders and the bundle id.
+  -->
+  <PropertyGroup Label="App identity">
+    <AppDisplayName Condition="'$(AppDisplayName)' == ''">Nightglass (working name)</AppDisplayName>
+    <AppShortName Condition="'$(AppShortName)' == ''">$([System.Text.RegularExpressions.Regex]::Replace('$(AppDisplayName)', '\s*\([^)]*\)', '').Trim())</AppShortName>
+    <AppExecutableName Condition="'$(AppExecutableName)' == ''">$(AppShortName.Replace(' ', ''))</AppExecutableName>
+    <AppBundleId Condition="'$(AppBundleId)' == ''">local.$(AppExecutableName.ToLowerInvariant()).mac</AppBundleId>
+    <AppMinimumSystemVersion Condition="'$(AppMinimumSystemVersion)' == ''">14.0</AppMinimumSystemVersion>
+    <NinaBaseVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(NinaRoot)CommonAssemblyInfo.cs')), '(?&lt;=AssemblyInformationalVersion\(")[^"]+'))</NinaBaseVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="AppDisplayName" Value="$(AppDisplayName)" />
+    <AssemblyMetadata Include="AppShortName" Value="$(AppShortName)" />
+    <AssemblyMetadata Include="AppBundleId" Value="$(AppBundleId)" />
+    <AssemblyMetadata Include="NinaBaseVersion" Value="$(NinaBaseVersion)" />
+  </ItemGroup>
+
+  <Target Name="CheckAppIdentity" BeforeTargets="CoreCompile">
+    <Error Condition="$(AppDisplayName.Replace('.', '').ToUpperInvariant().Contains('NINA'))" Text="AppDisplayName '$(AppDisplayName)' contains 'NINA'. MPL-2.0 grants no trademark rights; the fork needs its own name (credit it as 'based on N.I.N.A.')." />
+    <Error Condition="'$(AppShortName)' == ''" Text="AppShortName is empty (derived from AppDisplayName '$(AppDisplayName)')." />
+  </Target>
+
+  <ItemGroup>
+    <!-- macOS only: Avalonia.Native (AppKit windowing) + Avalonia.Skia instead of Avalonia.Desktop, which would also ship the Win32 and X11 backends -->
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Native" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Skia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Headless" Version="12.1.3" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.Platform/NINA.Mac.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.App.Test" />
+  </ItemGroup>
+
+</Project>

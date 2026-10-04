@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Lx200.Test</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.Lx200.Sim/NINA.Mac.Lx200.Sim.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.Lx200Probe/NINA.Mac.Lx200Probe.csproj" />
+  </ItemGroup>
+
+</Project>

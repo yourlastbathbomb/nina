@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Minimal stand-ins for the WPF types that leak into NINA's engine code, declared in their original
+    namespaces (System.Windows, System.Windows.Media, ...). Only what the engine compile errors prove is needed.
+    Value types reproduce WPF semantics; UI-only members are absent or throw PlatformNotSupportedException.
+  -->
+  <PropertyGroup>
+    <RootNamespace>System.Windows</RootNamespace>
+    <AssemblyName>NINA.Mac.WpfCompat</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

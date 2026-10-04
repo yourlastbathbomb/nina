@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NINA.Astrometry (and the Core/Profile code beneath it) on macOS:
+    - NativeSmokeTest.cs: libsofa.dylib / libnovas31.dylib (mac/scripts/build-astrometry-natives.sh) and JPLEPH,
+      reached through NINA.Mac.Native's resolver with the DLL names upstream NINA.Astrometry uses.
+    - Mac/: tests for the mac engine itself (the native resolver inside NINA.Astrometry, the deep-sky database).
+    - Upstream/: upstream NINA.Test fixtures, linked unchanged, that need only NINA.Core, NINA.Profile and NINA.Astrometry.
+      Fixtures that need WPF, Equipment, Image or the app are left out; see ../../src/README-engine.md.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Astrometry.Test</RootNamespace>
+    <!-- As NINA.Test.csproj, so the linked upstream fixtures compile exactly as they do on Windows -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../../src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+  </ItemGroup>
+
+  <!-- Upstream NINA.Test fixtures, linked unchanged -->
+  <PropertyGroup>
+    <UpstreamTests>$(NinaRoot)NINA.Test/</UpstreamTests>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- global using NUnit.Framework, plus the SetUpFixture that preloads the natives (DllLoader is a no-op off Windows) -->
+    <Compile Include="$(UpstreamTests)Usings.cs" Link="Upstream/Usings.cs" />
+
+    <!-- Astrometry -->
+    <Compile Include="$(UpstreamTests)AstrometryTest/*.cs" LinkBase="Upstream/AstrometryTest" />
+    <Compile Include="$(UpstreamTests)AngleTest.cs" Link="Upstream/AngleTest.cs" />
+    <Compile Include="$(UpstreamTests)CoordinatesTest.cs" Link="Upstream/CoordinatesTest.cs" />
+    <Compile Include="$(UpstreamTests)NighttimeCalculatorTest.cs" Link="Upstream/NighttimeCalculatorTest.cs" />
+    <Compile Include="$(UpstreamTests)NighttimeDataTest.cs" Link="Upstream/NighttimeDataTest.cs" />
+    <Compile Include="$(UpstreamTests)Database/DatabaseInteractionTest.cs" Link="Upstream/Database/DatabaseInteractionTest.cs" />
+
+    <!-- Core -->
+    <Compile Include="$(UpstreamTests)RMSTest.cs" Link="Upstream/RMSTest.cs" />
+    <Compile Include="$(UpstreamTests)Model/*.cs" LinkBase="Upstream/Model" />
+    <Compile Include="$(UpstreamTests)SerialCommunication/*.cs" LinkBase="Upstream/SerialCommunication" />
+    <Compile Include="$(UpstreamTests)Utility/SerialCommunication/*.cs" LinkBase="Upstream/Utility/SerialCommunication" />
+    <Compile Include="$(UpstreamTests)Utility/AsyncObservableCollectionTest.cs" Link="Upstream/Utility/AsyncObservableCollectionTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/CoreUtilTest.cs" Link="Upstream/Utility/CoreUtilTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/DeviceUpdateTimerTest.cs" Link="Upstream/Utility/DeviceUpdateTimerTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/MathHelperTest.cs" Link="Upstream/Utility/MathHelperTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/MicroCacheTest.cs" Link="Upstream/Utility/MicroCacheTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/NotifyTaskCompletionTest.cs" Link="Upstream/Utility/NotifyTaskCompletionTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/ObservableDictionaryTest.cs" Link="Upstream/Utility/ObservableDictionaryTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/ObservableLimitedSizedStackTest.cs" Link="Upstream/Utility/ObservableLimitedSizedStackTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/ObservableRectangleTest.cs" Link="Upstream/Utility/ObservableRectangleTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/ProjectVersionTest.cs" Link="Upstream/Utility/ProjectVersionTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/RetryTest.cs" Link="Upstream/Utility/RetryTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/TextEncodingTest.cs" Link="Upstream/Utility/TextEncodingTest.cs" />
+
+    <!-- Profile -->
+    <Compile Include="$(UpstreamTests)ProfileTest/*.cs" LinkBase="Upstream/ProfileTest" />
+    <!-- [Apartment(STA)] plus WPF Application.ShutdownMode: Windows-only test host -->
+    <Compile Remove="$(UpstreamTests)ProfileTest/ProfileServiceBehaviorTest.cs" />
+
+    <!-- Horizon files read by CustomHorizonTest from <output>/AstrometryTest/HorizonData, as NINA.Test.csproj copies them -->
+    <None Include="$(UpstreamTests)AstrometryTest/HorizonData/*" LinkBase="AstrometryTest/HorizonData" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
