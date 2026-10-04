@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- M1 camera probe: upstream ZWO binding + native resolver, no other NINA code yet -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NINA.Mac.ZwoProbe</RootNamespace>
+    <AssemblyName>zwoprobe</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(NinaRoot)NINA.Equipment/SDK/CameraSDKs/ASISDK/ASICameraDll.cs" Link="Upstream/ASICameraDll.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.Native/NINA.Mac.Native.csproj" />
+  </ItemGroup>
+
+</Project>

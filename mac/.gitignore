@@ -1,0 +1,6 @@
+# Vendor SDK archives and staged dylibs are fetched/built locally, never committed
+native/*
+!native/README.md
+bin/
+obj/
+artifacts/

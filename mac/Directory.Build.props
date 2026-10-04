@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    Fork-only macOS build (osx-arm64). Upstream projects stay untouched; the projects under mac/
+    compile upstream sources by link so merges from isbeorn/nina stay cheap.
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
+
+  <PropertyGroup>
+    <NinaRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))/</NinaRoot>
+    <MacRoot>$(MSBuildThisFileDirectory)</MacRoot>
+    <MacNativeStage>$(MacRoot)native/stage/</MacNativeStage>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>osx-arm64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

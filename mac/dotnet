@@ -1,0 +1,5 @@
+#!/bin/bash
+# Runs the user-local .NET 10 SDK (~/.dotnet) without touching the Homebrew .NET 8 on PATH.
+export DOTNET_ROOT="${DOTNET_ROOT_MAC:-$HOME/.dotnet}"
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+exec "$DOTNET_ROOT/dotnet" "$@"

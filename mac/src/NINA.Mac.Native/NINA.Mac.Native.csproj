@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.Native</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Staged vendor dylibs (mac/scripts/stage-*.sh) flow to every app/test that references this project -->
+  <ItemGroup>
+    <None Include="$(MacNativeStage)*.dylib;$(MacNativeStage)*.txt" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingNativeStage" BeforeTargets="Build" Condition="!Exists('$(MacNativeStage)libASICamera2.dylib')">
+    <Warning Text="mac/native/stage/libASICamera2.dylib is missing. Run mac/scripts/stage-zwo.sh; ZWO cameras will not load." />
+  </Target>
+
+</Project>

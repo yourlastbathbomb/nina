@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <Project Path="src/NINA.Mac.ZwoProbe/NINA.Mac.ZwoProbe.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NINA.Mac.Test/NINA.Mac.Test.csproj" />
+  </Folder>
+</Solution>
