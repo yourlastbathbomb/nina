@@ -246,7 +246,8 @@ namespace NINA.Mac.Astrometry.Test {
             ephemerisOpen = true;
 
             de.Should().Be(421);
-            // Data span of the DE421 file in nina.external (1900-02-01 .. 2050-01-?), from its first record
+            // Data span of the DE421 file in nina.external, from the start/end dates (SS) in its header record:
+            // 1899-12-04 .. 2050-01-02. Its title text names the full DE421 span, 1899-07-29 .. 2053-10-09.
             begin.Should().Be(2414992.5);
             end.Should().Be(2469808.5);
         }

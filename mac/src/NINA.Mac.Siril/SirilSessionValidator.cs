@@ -118,8 +118,13 @@ namespace NINA.Mac.Siril {
             if (plan.Dark == DarkSource.Folder) {
                 CheckCalibrationFolder(plan.DarksDirectory ?? Path.Combine(wd, SessionLayout.DarksFolder), "DARK", "darks", size, binning, Error);
             }
-            if (plan.FlatCalibration == FlatCalibration.SyntheticOffset && reference.GetDouble("OFFSET") == null) {
-                Error("Synthetic flat offset needs the OFFSET header in the frames");
+            if (plan.FlatCalibration == FlatCalibration.SyntheticOffset) {
+                if (reference.GetDouble("OFFSET") == null) {
+                    Error("Synthetic flat offset needs the OFFSET header in the frames");
+                }
+                if (!plan.SyntheticOffsetMultiplier.HasValue || plan.SyntheticOffsetMultiplier.Value <= 0) {
+                    Error("Synthetic flat offset needs a positive whole multiplier N for -bias=\"=N*$OFFSET\" (measure it once from biases and round it)");
+                }
             }
             if (plan.Dark == DarkSource.Library) {
                 CheckLibraryMaster(plan.MasterDarkPathTemplate, reference, size, Error, Warn);

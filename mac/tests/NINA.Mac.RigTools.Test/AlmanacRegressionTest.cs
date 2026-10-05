@@ -34,6 +34,10 @@ namespace NINA.Mac.RigTools.Test {
     /// missing precession, wrong twilight sign) moves these times by a minute or more; the earlier sanity test
     /// only bounded the dusk and dawn hours.
     /// </para>
+    /// <para>
+    /// The Sun's apparent place is also pinned to the oracle on four 2026 dates where the low-precision formula's
+    /// second harmonic (0.020 sin 2g) peaks, which this one night cannot exercise.
+    /// </para>
     /// No external almanac (HKO/USNO) was consulted; see the README.
     /// </summary>
     [TestFixture]
@@ -61,6 +65,21 @@ namespace NINA.Mac.RigTools.Test {
             dark.Should().NotBeNull();
             ShouldBeNear(dark.Value.Dusk, Hkt(duskDay, duskHour, duskMinute, duskSeconds), $"dusk at {limit} deg");
             ShouldBeNear(dark.Value.Dawn, Hkt(dawnDay, dawnHour, dawnMinute, dawnSeconds), $"dawn at {limit} deg");
+        }
+
+        // Oracle "Apparent Sun at 0h UTC where |sin 2g| ~ 1". On 2026-10-04 (g = 269 deg) the formula's 0.020 sin 2g
+        // term is only 0.0005 deg, so the night above cannot see it; on these dates it is the full 0.020 deg.
+        // Tolerance: the formula's quoted 0.01 deg, as for Meeus 25.a. Measured: RA within 0.0052 deg, Dec within
+        // 0.0033 deg. With the sin 2g term removed, RA is off by 0.0165-0.0244 deg on every date (review F3 mutation).
+        [TestCase(2026, 2, 18, 331.45653, -11.70348)]
+        [TestCase(2026, 5, 21, 57.79920, 20.14529)]
+        [TestCase(2026, 8, 20, 149.22863, 12.50568)]
+        [TestCase(2026, 11, 19, 234.35915, -19.40826)]
+        public void Sun_WhereTheSecondHarmonicPeaks_MatchesTheOracle(int year, int month, int day, double raDeg, double decDeg) {
+            var sun = LowPrecisionSun.Position(new DateTimeOffset(year, month, day, 0, 0, 0, TimeSpan.Zero));
+
+            (sun.RaHours * 15.0).Should().BeApproximately(raDeg, 0.01);
+            sun.DecDeg.Should().BeApproximately(decDeg, 0.01);
         }
 
         [Test]

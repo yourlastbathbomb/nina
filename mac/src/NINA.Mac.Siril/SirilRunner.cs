@@ -37,7 +37,9 @@ namespace NINA.Mac.Siril {
 
         /// <summary>
         /// Configuration copied into <see cref="OwnConfigPath"/> before every run, so the user's Siril preferences apply
-        /// (research SIR-M3). Null or missing: start from an empty file, i.e. Siril defaults.
+        /// (research SIR-M3), except the output format: generated scripts pin extension, bit depth and compression
+        /// (<see cref="SirilScriptGenerator.PinOutputFormat"/>), since the GUI's force_16bit=true would otherwise make
+        /// calibrated frames 16-bit. Null or missing: start from an empty file, i.e. Siril defaults.
         /// </summary>
         public string SeedConfigPath { get; set; } = UserSirilConfig;
 

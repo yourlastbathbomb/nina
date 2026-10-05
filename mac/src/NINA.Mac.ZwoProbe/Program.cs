@@ -102,13 +102,16 @@ namespace NINA.Mac.ZwoProbe {
             Log($"Dylib:   {NativeLibraries.Locate("ASICamera2.dll") ?? "NOT FOUND"}");
             Log($"SDK:     {GetSDKVersion()}");
             var ok = true;
-            ok &= Check("sizeof(ASI_CAMERA_INFO)", Marshal.SizeOf<ASI_CAMERA_INFO>(), 248);
-            ok &= Check("offsetof(ASI_CAMERA_INFO, MaxWidth)", Marshal.OffsetOf<ASI_CAMERA_INFO>("maxWidth").ToInt32(), 80);
-            ok &= Check("offsetof(ASI_CAMERA_INFO, IsColorCam)", Marshal.OffsetOf<ASI_CAMERA_INFO>(nameof(ASI_CAMERA_INFO.IsColorCam)).ToInt32(), 88);
-            ok &= Check("offsetof(ASI_CAMERA_INFO, SupportedBins)", Marshal.OffsetOf<ASI_CAMERA_INFO>(nameof(ASI_CAMERA_INFO.SupportedBins)).ToInt32(), 96);
-            ok &= Check("offsetof(ASI_CAMERA_INFO, PixelSize)", Marshal.OffsetOf<ASI_CAMERA_INFO>(nameof(ASI_CAMERA_INFO.PixelSize)).ToInt32(), 192);
-            ok &= Check("sizeof(ASI_CONTROL_CAPS)", Marshal.SizeOf<ASI_CONTROL_CAPS>(), 264);
-            ok &= Check("offsetof(ASI_CONTROL_CAPS, ControlType)", Marshal.OffsetOf<ASI_CONTROL_CAPS>(nameof(ASI_CONTROL_CAPS.ControlType)).ToInt32(), 224);
+            // The SDK fills ASICameraDll's private native mirrors (C long = CLong); the public structs keep upstream's int layout
+            var info = SdkNativeLayout.CameraInfo;
+            var caps = SdkNativeLayout.ControlCaps;
+            ok &= Check("sizeof(ASI_CAMERA_INFO)", Marshal.SizeOf(info), 248);
+            ok &= Check("offsetof(ASI_CAMERA_INFO, MaxWidth)", Marshal.OffsetOf(info, nameof(ASI_CAMERA_INFO.MaxWidth)).ToInt32(), 80);
+            ok &= Check("offsetof(ASI_CAMERA_INFO, IsColorCam)", Marshal.OffsetOf(info, nameof(ASI_CAMERA_INFO.IsColorCam)).ToInt32(), 88);
+            ok &= Check("offsetof(ASI_CAMERA_INFO, SupportedBins)", Marshal.OffsetOf(info, nameof(ASI_CAMERA_INFO.SupportedBins)).ToInt32(), 96);
+            ok &= Check("offsetof(ASI_CAMERA_INFO, PixelSize)", Marshal.OffsetOf(info, nameof(ASI_CAMERA_INFO.PixelSize)).ToInt32(), 192);
+            ok &= Check("sizeof(ASI_CONTROL_CAPS)", Marshal.SizeOf(caps), 264);
+            ok &= Check("offsetof(ASI_CONTROL_CAPS, ControlType)", Marshal.OffsetOf(caps, nameof(ASI_CONTROL_CAPS.ControlType)).ToInt32(), 224);
             Log($"Cameras: {GetNumOfConnectedCameras()} connected");
             return ok ? 0 : 1;
 
@@ -164,13 +167,13 @@ namespace NINA.Mac.ZwoProbe {
                 Log($"    {type,-28} {caps.Name,-22} min {caps.MinValue,9} max {caps.MaxValue,11} def {caps.DefaultValue,9} now {value,11} {(caps.IsWritable == ASI_BOOL.ASI_TRUE ? "rw" : "ro")}{(caps.IsAutoSupported == ASI_BOOL.ASI_TRUE ? " auto" : "")}");
             }
             try {
-                GetGainOffset(cam.Id, out var offHdr, out var offUnity, out var gainLrn, out var offLrn);
+                GainPresets.GetGainOffset(cam.Id, out var offHdr, out var offUnity, out var gainLrn, out var offLrn);
                 Log($"  GetGainOffset  offset(HighestDR)={offHdr} offset(Unity)={offUnity} gain(LowestRN)={gainLrn} offset(LowestRN)={offLrn}");
             } catch (Exception ex) {
                 Log($"  GetGainOffset  failed: {ex.Message}");
             }
             try {
-                GetLMHGainOffset(cam.Id, out var lg, out var mg, out var hg, out var ho);
+                GainPresets.GetLMHGainOffset(cam.Id, out var lg, out var mg, out var hg, out var ho);
                 Log($"  GetLMHGainOffset low={lg} medium={mg} high={hg} highOffset={ho}");
             } catch (Exception ex) {
                 Log($"  GetLMHGainOffset failed: {ex.Message}");

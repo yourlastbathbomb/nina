@@ -18,6 +18,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using NINA.Mac.App.Diagnostics;
 using NINA.Mac.App.Theming;
 using NINA.Mac.App.ViewModels;
 using NINA.Mac.App.Views;
@@ -44,6 +45,7 @@ namespace NINA.Mac.App {
                 Theme.Apply(Services.Settings.Current.NightVision);
                 var viewModel = new MainWindowViewModel(Services, Theme);
                 desktop.MainWindow = new MainWindow { DataContext = viewModel };
+                GuiSmoke.Active?.Attach(desktop, viewModel); // --gui-smoke only: watch the real window, then quit
                 desktop.Exit += (_, _) => Shutdown();
                 NativeMenu.SetMenu(this, BuildAppMenu(viewModel));
                 ticker = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => Services.Tick());

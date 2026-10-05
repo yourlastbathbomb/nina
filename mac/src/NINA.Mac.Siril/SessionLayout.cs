@@ -166,7 +166,12 @@ namespace NINA.Mac.Siril {
     ///     masters/dark_20s_G252_O50_T0_B2.fit  master darks named by the Siril path-parse template
     /// </code>
     /// Folder and file names use NINA's token formats (BaseImageData.GetImagePatterns), so stock NINA with the
-    /// patterns in <see cref="NinaFilePatterns"/> writes the same paths.
+    /// patterns in <see cref="NinaFilePatterns"/> writes the same paths for target names that
+    /// <see cref="SanitizeFolderName"/> leaves unchanged apart from NINA's own '\' and '/' to '-'. NINA (with this fork's
+    /// CoreUtil patch) maps Windows' invalid file-name characters to '_' on every OS, as this layout does, but keeps '$'
+    /// and a leading '.', which this layout does not, so frames of such a target would land in a folder
+    /// <see cref="GetTargetFolders(DateOnly, string)"/> never looks in. The engine therefore saves through
+    /// <see cref="GetFramePath"/>; see <see cref="KeepsNinaFolderName"/>.
     /// </summary>
     public sealed class SessionLayout {
         public const string LightsFolder = "lights";
@@ -282,21 +287,36 @@ namespace NINA.Mac.Siril {
 
         /// <summary>
         /// Target folder name. NINA's own sanitising (CoreUtil.ReplaceAllInvalidFilenameChars: '\' and '/' to '-', then
-        /// OS-invalid characters to '_') plus what breaks Siril scripts: '"' (Siril cannot quote a word holding both quote
-        /// kinds), '$' (path-parse token delimiter), ':' (path-parse key separator; Finder shows it as '/') and control
-        /// characters. Spaces and apostrophes are kept: generated scripts quote whole words (research SIR-M4).
+        /// Windows' invalid file-name characters to '_' on every OS, so names survive a copy to Windows or exFAT; this
+        /// covers '"' (Siril cannot quote a word holding both quote kinds), ':' (path-parse key separator; Finder shows it
+        /// as '/') and control characters) plus '$' (Siril path-parse token delimiter). Spaces and apostrophes are kept:
+        /// generated scripts quote whole words (research SIR-M4).
         /// </summary>
         public static string SanitizeFolderName(string name) {
             var trimmed = (name ?? string.Empty).Trim().Replace('\\', '-').Replace('/', '-');
             var sb = new StringBuilder(trimmed.Length);
             foreach (var c in trimmed) {
-                sb.Append(c == '"' || c == '$' || c == ':' || c == '\0' || char.IsControl(c) ? '_' : c);
+                sb.Append(c == '$' || char.IsControl(c) || Array.IndexOf(NinaTokenValues.PortableInvalidFileNameChars, c) >= 0 ? '_' : c);
             }
             var result = sb.ToString().Trim();
             if (result.StartsWith('.')) {
                 result = "_" + result.Substring(1);
             }
             return result.Length == 0 ? UntitledTarget : result;
+        }
+
+        /// <summary>
+        /// True when NINA's own sanitising of <paramref name="targetName"/> (CoreUtil.ReplaceAllInvalidFilenameChars,
+        /// ported as NinaTokenValues.Sanitize) gives the folder name <see cref="SanitizeFolderName"/> gives, i.e. when
+        /// frames saved with the <see cref="NinaFilePatterns"/> profile patterns land where this layout looks. False for
+        /// names with '$' or a leading '.', and for an empty name (NINA drops the empty
+        /// $$TARGETNAME$$ segment, so its lights go to &lt;night&gt;/lights, not &lt;night&gt;/untitled/lights).
+        /// </summary>
+        public static bool KeepsNinaFolderName(string targetName) {
+            if (string.IsNullOrWhiteSpace(targetName)) {
+                return false;
+            }
+            return string.Equals(SanitizeFolderName(targetName), NinaTokenValues.Sanitize(targetName).Trim(), StringComparison.Ordinal);
         }
 
         private static string SanitizeFileName(string name) => SanitizeFolderName(name);
@@ -379,13 +399,26 @@ namespace NINA.Mac.Siril {
 
         private static string F2(double value) => Sanitize(value.ToString("F2", CultureInfo.InvariantCulture));
 
-        /// <summary>NINA.Core/Utility/CoreUtil.cs:246-263 on macOS (Path.GetInvalidFileNameChars() is '\0' and '/').</summary>
+        /// <summary>
+        /// Windows' invalid file-name characters (control characters, " &lt; &gt; | : * ? \ /). This fork's
+        /// CoreUtil.ReplaceInvalidFilenameChars uses them on every OS, not macOS's own set ('\0' and '/').
+        /// </summary>
+        internal static readonly char[] PortableInvalidFileNameChars = BuildPortableInvalidFileNameChars();
+
+        private static char[] BuildPortableInvalidFileNameChars() {
+            var chars = new List<char>();
+            for (var c = 0; c < 32; c++) { chars.Add((char)c); }
+            chars.AddRange("\"<>|:*?\\/");
+            return chars.ToArray();
+        }
+
+        /// <summary>NINA.Core/Utility/CoreUtil.cs ReplaceAllInvalidFilenameChars, with this fork's portable character set.</summary>
         internal static string Sanitize(string value) {
             if (value == null) {
                 return string.Empty;
             }
             var s = value.Trim().Replace("\\", "-").Replace("/", "-");
-            return string.Join("_", s.Split(Path.GetInvalidFileNameChars()));
+            return string.Join("_", s.Split(PortableInvalidFileNameChars));
         }
     }
 }

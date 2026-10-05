@@ -2,7 +2,8 @@
 
   <!--
     macOS services the app needs at the scope: sleep / App Nap prevention, power source, bundle-aware resource
-    paths and user data folders. P/Invoke only (IOKit, CoreFoundation, libobjc); no engine or UI dependency.
+    paths, user data folders and display state. P/Invoke only (IOKit, CoreFoundation, CoreGraphics, libobjc); no
+    engine or UI dependency.
   -->
   <PropertyGroup>
     <RootNamespace>NINA.Mac.Platform</RootNamespace>

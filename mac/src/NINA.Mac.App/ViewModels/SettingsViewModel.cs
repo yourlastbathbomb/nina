@@ -167,6 +167,11 @@ namespace NINA.Mac.App.ViewModels {
             ".NET runtime — MIT",
             "ZWO ASI Camera SDK — MIT-style (ZWO Company)",
             "libusb 1.0 — LGPL-2.1 (dynamically linked)",
+            // SOFA licence clause 3(a): the work must carry this statement
+            "IAU SOFA (libsofa) — SOFA Software License. This application uses routines and computations derived by its developers from software provided by SOFA under license to them, and does not itself constitute software provided by and/or endorsed by SOFA.",
+            "NOVAS C3.1 (libnovas31) — Astronomical Applications Department, U.S. Naval Observatory",
+            "JPL DE421 planetary ephemeris — Jet Propulsion Laboratory, California Institute of Technology",
+            "Inter typeface — SIL Open Font License 1.1; Roboto — Apache-2.0",
         };
 
         public string NoticesText => "Full notices: Contents/Resources/THIRD-PARTY-NOTICES.txt and Contents/Resources/licenses/.";

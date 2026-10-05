@@ -140,8 +140,9 @@ namespace NINA.Mac.ImageAnalysis.Test {
         public void MonoBin_IsTheMonoPath() {
             // ASICamera clears the Bayer pattern in mono-bin mode, so the frame is analysed without debayering
             var s = Run(_ => Psf.Gaussian(6.0), DefaultsWithoutOptics, BayerPattern.None, seed: 13);
-            s.Analysis.StretchedRgb48.Should().BeNull();
-            s.Analysis.Stretched16.Should().NotBeNull();
+            s.Analysis.DisplayRgb48.Should().BeNull();
+            s.Analysis.Display16.Should().NotBeNull();
+            s.Analysis.IsStretched.Should().BeTrue();
             s.Stars.StarList.Should().NotBeEmpty();
         }
 
@@ -174,23 +175,107 @@ namespace NINA.Mac.ImageAnalysis.Test {
         }
 
         [Test]
-        public void SaturatedStars_DoNotBreakDetection() {
+        public void SaturatedStars_AreMeasuredTooLarge_AndRemovedByTheRadiusFilter() {
+            // Characterisation of upstream: NINA has no saturation check. A clipped star passes every per-blob test and
+            // measures too large (flat-topped profile). Among normal stars its radius lies above mean + 1.5 sigma, so
+            // the final radius filter (StarDetection.cs:774-782) is what removes it.
             var sky = new SkyFrame(1920, 1080) { Background = 1500, ReadNoise = 8, Gain = 1, Seed = 21 };
             sky.AddStarField(100, _ => Psf.Gaussian(6.0), 5e4, 8e5, 40, 30, 22);
             sky.Stars.Add(new SyntheticStar { X = 500.4, Y = 400.7, Flux = 3e7, Psf = Psf.Gaussian(6.0) });
             sky.Stars.Add(new SyntheticStar { X = 1400.2, Y = 700.1, Flux = 5e7, Psf = Psf.Gaussian(6.0) });
-            var analysis = FrameAnalyzer.Analyze(sky.Render(), DefaultsWithoutOptics);
-            var matches = StarMatching.Match(sky.Stars, analysis.Stars.StarList, MatchRadius);
-            var saturated = matches.Where(m => m.Truth.Peak > 65535).ToList();
-            TestContext.Out.WriteLine($"saturated stars kept: {saturated.Count}, their HFR: {string.Join(", ", saturated.Select(m => m.Detected.HFR.ToString("F2")))}; avg HFR {analysis.Stars.AverageHFR:F3}");
-            // NINA has no saturation check: clipped stars measure too large and are only dropped if the radius filter
-            // (mean +/- 1.5 sigma of the blob radii) rejects them.
-            foreach (var m in saturated) {
-                m.Detected.HFR.Should().BeGreaterThan(m.Truth.Psf.HalfFluxRadius);
+            var stars = FrameAnalyzer.Analyze(sky.Render(), DefaultsWithoutOptics).Stars;
+            var saturatedTruth = sky.Stars.Where(t => t.Peak > 65535).ToList();
+            saturatedTruth.Should().HaveCount(2);
+
+            var kept = StarMatching.Match(saturatedTruth, stars.StarList, MatchRadius);
+            var removed = StarMatching.Match(saturatedTruth, stars.RadiusFilterRejected, MatchRadius);
+            TestContext.Out.WriteLine($"radius band {stars.RadiusFilterBand.Low:F2}-{stars.RadiusFilterBand.High:F2}; saturated stars kept {kept.Count}, removed by the radius filter {removed.Count}: " +
+                string.Join("; ", removed.Select(m => $"peak {m.Truth.Peak:F0} radius {m.Detected.DetectionRadius:F2} HFR {m.Detected.HFR:F2} (unclipped {m.Truth.Psf.HalfFluxRadius:F2})")));
+            kept.Should().BeEmpty();
+            removed.Should().HaveCount(2, "both were measured (no saturation check) and then removed by the radius filter");
+            foreach (var m in removed) {
+                m.Detected.HFR.Should().BeGreaterThan(1.3 * m.Truth.Psf.HalfFluxRadius, "the clipped core flattens the profile");
+                m.Detected.DetectionRadius.Should().BeGreaterThan(stars.RadiusFilterBand.High);
             }
+
+            var matches = StarMatching.Match(sky.Stars, stars.StarList, MatchRadius);
             var unsaturated = matches.Where(m => m.Truth.Peak <= 65535).ToList();
             unsaturated.Count.Should().BeGreaterThan(30);
             unsaturated.Average(m => m.Detected.HFR / m.Truth.Psf.HalfFluxRadiusWithin(m.Detected.MeasurementRadius)).Should().BeApproximately(1, 0.02);
+        }
+
+        /// <summary>
+        /// Upstream bug the port keeps on purpose (StarDetection.cs:775-776). With all star radii equal, the one-pass
+        /// sigma sqrt((sum r^2 - n avg^2) / n) is NaN for some n because avg comes out a few ulp off r, and the radius
+        /// band then excludes every star. Noise-free identical stars 120 px apart are 97 px apart in the 1552/1920
+        /// detection image, so every blob has the same size and every radius is 4 / (1552/1920) = 4.948 px.
+        /// </summary>
+        [TestCase(6, 6)]
+        [TestCase(7, 0)]
+        [TestCase(8, 8)]
+        public void EqualRadii_UpstreamOnePassStdDev_DropsEveryStar(int count, int expectedStars) {
+            var sky = new SkyFrame(1920, 1080) { Background = 1500, ReadNoise = 0, Gain = 0, Seed = 1 };
+            for (int k = 0; k < count; k++) {
+                sky.Stars.Add(new SyntheticStar { X = 60 + (k * 120), Y = 60, Flux = 3000, Psf = Psf.Gaussian(3.0) });
+            }
+            var stars = FrameAnalyzer.Analyze(sky.Render(), DefaultsWithoutOptics).Stars;
+            var measured = stars.StarList.Concat(stars.RadiusFilterRejected).ToList();
+            TestContext.Out.WriteLine($"{count} identical stars: blobs {stars.BlobCount}, measured {measured.Count}, kept {stars.StarList.Count}, band {stars.RadiusFilterBand}");
+
+            stars.BlobCount.Should().Be(count);
+            measured.Should().HaveCount(count, "every blob passes the per-blob checks");
+            measured.Select(d => d.DetectionRadius).Distinct().Should().ContainSingle().Which.Should().BeApproximately(4 / (1552.0 / 1920.0), 1e-12);
+            stars.StarList.Should().HaveCount(expectedStars);
+            if (expectedStars == 0) {
+                stars.RadiusFilterRejected.Should().HaveCount(count);
+                double.IsNaN(stars.RadiusFilterBand.Low).Should().BeTrue("the one-pass sigma of these equal radii is NaN");
+                double.IsNaN(stars.AverageHFR).Should().BeTrue();
+            }
+        }
+
+        /// <summary>
+        /// README proposed patch 1. Replays the radius band of StarDetection.cs:774-782 (same summation order as
+        /// upstream and the port) for n equal radii r = k / (1552/1920). Compared: upstream's one-pass sigma,
+        /// clamping it with Math.Max(0, ...), and a two-pass sigma sqrt(sum (r - avg)^2 / n). The clamp is not enough,
+        /// because a zero-width band around an avg that is a few ulp off r still excludes r. The two-pass sigma is at
+        /// least |r - avg|, so the 1.5 sigma band always contains r.
+        /// </summary>
+        [Test]
+        public void ProposedPatch1_TwoPassStdDev_KeepsEqualRadii_WhereAClampDoesNot() {
+            static bool InBand(double r, double avg, double stdev) => r <= avg + (1.5 * stdev) && r >= avg - (1.5 * stdev);
+            int cases = 0, upstreamDrops = 0, clampDrops = 0, twoPassDrops = 0;
+            for (int k = 1; k <= 15; k++) {
+                double r = k / (1552.0 / 1920.0);
+                for (int n = 2; n <= 40; n++) {
+                    double sumRadius = 0, sumSquares = 0;
+                    for (int i = 0; i < n; i++) {
+                        sumRadius += r;
+                        sumSquares += r * r;
+                    }
+                    double avg = sumRadius / n;
+                    double onePass = Math.Sqrt((sumSquares - (n * avg * avg)) / n);
+                    double clamped = Math.Sqrt(Math.Max(0, (sumSquares - (n * avg * avg)) / n));
+                    double deviations = 0;
+                    for (int i = 0; i < n; i++) {
+                        deviations += (r - avg) * (r - avg);
+                    }
+                    double twoPass = Math.Sqrt(deviations / n);
+                    cases++;
+                    upstreamDrops += InBand(r, avg, onePass) ? 0 : 1;
+                    clampDrops += InBand(r, avg, clamped) ? 0 : 1;
+                    twoPassDrops += InBand(r, avg, twoPass) ? 0 : 1;
+                    if (k == 4 && n == 7) {
+                        // the end-to-end case of EqualRadii_UpstreamOnePassStdDev_DropsEveryStar
+                        double.IsNaN(onePass).Should().BeTrue();
+                        InBand(r, avg, clamped).Should().BeFalse();
+                        InBand(r, avg, twoPass).Should().BeTrue();
+                    }
+                }
+            }
+            TestContext.Out.WriteLine($"{cases} equal-radius cases: every star dropped in {upstreamDrops} with upstream's sigma, {clampDrops} with the clamp, {twoPassDrops} with the two-pass sigma");
+            upstreamDrops.Should().BeGreaterThan(0);
+            clampDrops.Should().BeGreaterThan(0);
+            twoPassDrops.Should().Be(0);
         }
 
         [Test]

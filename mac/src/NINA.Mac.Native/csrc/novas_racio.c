@@ -13,9 +13,11 @@
  * cio_ra.bin lookup for novas.c.
  *
  * set_racio_file (char *name)
- *   NINA.Astrometry/NOVAS.cs imports "set_racio_file" but never calls it. The Windows NOVAS31lib.dll
- *   that NINA ships exports it. The NOVAS C3.1 source in this repo does not define it, so without
- *   this shim a call would throw EntryPointNotFoundException.
+ *   NINA.Astrometry/NOVAS.cs imports "set_racio_file" but never calls it. Whether the Windows
+ *   NOVAS31lib.dll that NINA ships exports it is not known here: that DLL is a Git LFS object in the
+ *   NINA/External submodule, which this checkout does not contain. The NOVAS C3.1 sources in this repo
+ *   do not define it, and NOVAS31/NOVAS31/NOVAS31.vcxproj compiles only those sources. This shim
+ *   provides it so that a call cannot throw EntryPointNotFoundException on macOS.
  *
  *   name is the path of the CIO RA file to use; NULL or "" means no file. A name of PATH_MAX bytes or
  *   more also means no file. novas.c decides once per process, on the first call of cio_location,
@@ -24,19 +26,22 @@
  *
  * Default: no file (set_racio_file never called)
  *   cio_location then takes its built-in path: the CIO right ascension comes from the equinox-based
- *   formula (ira_equinox) and ref_sys = 2. NINA gets the same on Windows today. NINA copies cio_ra.bin
- *   to External/x64/NOVAS/, but stock novas.c only opens "cio_ra.bin" in the current working
- *   directory and NINA never calls set_racio_file, so the file is never found. Unlike stock novas.c,
+ *   formula (ira_equinox) and ref_sys = 2. NINA presumably gets the same on Windows today: it copies
+ *   cio_ra.bin to External/x64/NOVAS/, but stock novas.c only opens "cio_ra.bin" in the current working
+ *   directory and NINA never calls set_racio_file, so the file is not found (inferred from the
+ *   sources, not checked on Windows). Unlike stock novas.c,
  *   this build never looks in the working directory, so the result cannot change with the CWD (a
  *   Finder-launched app runs with CWD '/', a terminal launch with whatever directory you are in).
  *   cio_ra.bin is not shipped with the macOS build.
  *
  * Format guard
  *   cio_array reads the file header as 3 doubles and one C long, then 2-double records. A C long is
- *   8 bytes on macOS arm64. The cio_ra.bin that NINA ships for Windows was written with a 4-byte long
- *   (2,922,540 B = 28 + 16 x 182,657), so NOVAS here would misread it without any error. A file is
- *   therefore accepted only if its size is exactly 3*8 + sizeof(long) + 16 * n_recs. Otherwise the
- *   open fails with errno EINVAL and NOVAS falls back as if no file had been set. To make a valid
+ *   8 bytes on macOS arm64 but 4 bytes on Windows, so a cio_ra.bin written by a Windows build of
+ *   cio_file.c (3*8 + 4 + 16 * n_recs bytes) would be misread here without any error. The cio_ra.bin
+ *   that NINA ships (NINA/NINA.csproj copies External/x64/NOVAS/cio_ra.bin) is presumably such a file;
+ *   it is a Git LFS object that this checkout does not contain, so its size and layout were not
+ *   checked. A file is therefore accepted only if its size is exactly 3*8 + sizeof(long) + 16 * n_recs.
+ *   Otherwise the open fails with errno EINVAL and NOVAS falls back as if no file had been set. To make a valid
  *   file, build and run NOVAS31/NOVAS31/cio_file.c on the Mac, from CIO_RA.TXT (a Git LFS object that
  *   this checkout does not contain).
  *

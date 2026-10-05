@@ -64,6 +64,8 @@ namespace NINA.Mac.Siril.Test {
             commands.Should().Equal(
                 "requires 1.3.4",
                 "setext fit",
+                "set32bits",
+                "setcompress 0",
                 $"cd \"{Root}/2026-10-03/NGC 253\"",
                 "cd biases",
                 "convert bias -out=../process",
@@ -106,8 +108,8 @@ namespace NINA.Mac.Siril.Test {
             var stock = TestEnv.Commands(File.ReadAllText(stockPath));
 
             generated[0].Should().Be(stock[0], "both start with requires");
-            generated.Skip(1).Take(2).Should().Equal("setext fit", "cd \"/tmp/stock run\"");
-            generated.Skip(3).Should().Equal(stock.Skip(1), "after pinning the extension and the folder, the commands are the stock ones");
+            generated.Skip(1).Take(4).Should().Equal("setext fit", "set32bits", "setcompress 0", "cd \"/tmp/stock run\"");
+            generated.Skip(5).Should().Equal(stock.Skip(1), "after pinning the output format and the folder, the commands are the stock ones");
         }
 
         [Test]
@@ -128,7 +130,8 @@ namespace NINA.Mac.Siril.Test {
             expected[^1].Should().Be("close");
             expected.Insert(expected.Count - 1, "cd .."); // the generator leaves process/ before closing, like OSC_Preprocessing
 
-            generated.Skip(3).Should().Equal(expected);
+            generated.Skip(1).Take(3).Should().Equal("setext fit", "set32bits", "setcompress 0");
+            generated.Skip(5).Should().Equal(expected);
         }
 
         [Test]
@@ -190,9 +193,31 @@ namespace NINA.Mac.Siril.Test {
         }
 
         [Test]
+        public void MasterDarkBuildScript_PinsTheSameOutputFormat() {
+            var root = TestEnv.NewTempDirectory("pin");
+            try {
+                var local = new SessionLayout(new SessionLayoutOptions { Root = root });
+                var rig = new Synthetic.SyntheticRig(64, 48);
+                for (var k = 0; k < 3; k++) {
+                    Synthetic.NinaFrames.Save(local, Synthetic.NinaFrames.Info("DARK", new DateTime(2026, 9, 28, 14, k, 0, DateTimeKind.Utc), k + 1, 20, null, rig), rig, new ushort[64 * 48]);
+                }
+
+                var commands = TestEnv.Commands(local.Library.CreateMasterBuildScript(local.Library.ScanSets()).Text);
+
+                commands.Take(4).Should().Equal("requires 1.3.4", "setext fit", "set32bits", "setcompress 0");
+            } finally {
+                TestEnv.Delete(root);
+            }
+        }
+
+        [Test]
         public void InvalidPlans_Throw() {
             var offset = Plan();
             offset.FlatCalibration = FlatCalibration.SyntheticOffset;
+            FluentActions.Invoking(() => SirilScriptGenerator.Generate(offset)).Should().Throw<ArgumentException>();
+            offset.SyntheticOffsetMultiplier = 0;
+            FluentActions.Invoking(() => SirilScriptGenerator.Generate(offset)).Should().Throw<ArgumentException>("Siril cannot parse a zero level");
+            offset.SyntheticOffsetMultiplier = -16;
             FluentActions.Invoking(() => SirilScriptGenerator.Generate(offset)).Should().Throw<ArgumentException>();
 
             var haTwoPass = Plan();

@@ -43,7 +43,10 @@ namespace NINA.Mac.Siril {
         /// <summary>Master of the biases/ folder: dark flats (preferred) or biases (stock).</summary>
         BiasFrames,
 
-        /// <summary>Uniform level -bias="=N*$OFFSET" from the OFFSET header (research SIR-M2); N measured once.</summary>
+        /// <summary>
+        /// Uniform level -bias="=N*$OFFSET" from the OFFSET header (research SIR-M2); N measured once and rounded to a
+        /// whole number, the only multiplier siril-cli 1.4.4 parses.
+        /// </summary>
         SyntheticOffset,
 
         None,
@@ -107,8 +110,13 @@ namespace NINA.Mac.Siril {
 
         public FlatCalibration FlatCalibration { get; set; } = FlatCalibration.BiasFrames;
 
-        /// <summary>N in -bias="=N*$OFFSET"; required for <see cref="FlatCalibration.SyntheticOffset"/>.</summary>
-        public double? SyntheticOffsetMultiplier { get; set; }
+        /// <summary>
+        /// N in -bias="=N*$OFFSET"; required (positive) for <see cref="FlatCalibration.SyntheticOffset"/>. Whole numbers
+        /// only: siril-cli 1.4.4 aborts calibrate with "The offset value could not be parsed from expression" for 16.5,
+        /// 15.75 and even 16.0 times $OFFSET (verified on this Mac). Round the measured bias/OFFSET slope; the pedestal
+        /// error is then at most OFFSET/2 ADU.
+        /// </summary>
+        public int? SyntheticOffsetMultiplier { get; set; }
 
         public RegistrationReference Registration { get; set; } = RegistrationReference.MiddleFrame;
 
@@ -160,9 +168,10 @@ namespace NINA.Mac.Siril {
     /// with the same commands and parameters, adapted to the NINA-mac layout: the master dark comes from the library via
     /// path-parse tokens (Siril aborts when none matches), flats may be calibrated with a synthetic offset, and alt-az
     /// field rotation can use a mid-session reference. Paths are relative to the working directory, which the script
-    /// enters first with an absolute cd. 'setext fit' pins the extension so master names do not depend on preferences;
-    /// like any 'set', it is saved into the ini siril-cli was started with, which <see cref="SirilRunner"/> keeps
-    /// separate from the user's GUI configuration.
+    /// enters first with an absolute cd. <see cref="PinOutputFormat"/> fixes the output format so file names and bit
+    /// depth do not depend on the Siril preferences <see cref="SirilRunner"/> seeds from the GUI; like any 'set', those
+    /// commands are saved into the ini siril-cli was started with, which the runner keeps separate from the user's GUI
+    /// configuration.
     /// </summary>
     public static class SirilScriptGenerator {
         public const string RequiredSirilVersion = "1.3.4";
@@ -190,7 +199,7 @@ namespace NINA.Mac.Siril {
             var b = new SirilScriptBuilder(wd);
             Header(b, plan, wd);
             b.Command("requires", RequiredSirilVersion);
-            b.Command("setext", "fit");
+            PinOutputFormat(b);
             b.CdAbsolute(wd);
 
             // Flat calibration level (bias master or synthetic offset)
@@ -208,7 +217,7 @@ namespace NINA.Mac.Siril {
                 b.Cd(wd);
                 biasArgument = "-bias=" + Path.Combine(masters, "bias_stacked");
             } else if (plan.FlatCalibration == FlatCalibration.SyntheticOffset) {
-                biasArgument = "-bias==" + plan.SyntheticOffsetMultiplier.Value.ToString("0.###", CultureInfo.InvariantCulture) + "*$OFFSET";
+                biasArgument = "-bias==" + plan.SyntheticOffsetMultiplier.Value.ToString(CultureInfo.InvariantCulture) + "*$OFFSET";
             }
 
             var flatMaster = Path.Combine(masters, "pp_flat_stacked");
@@ -341,6 +350,19 @@ namespace NINA.Mac.Siril {
             return new SirilScript(b.ToString(), wd, plan.Mode == ProcessingMode.Rgb ? RgbScriptFileName : HaOIIIScriptFileName, warnings);
         }
 
+        /// <summary>
+        /// Pins what siril-cli would otherwise take from the preferences copied out of the GUI configuration (siril-cli
+        /// 1.4.4, verified with a seed holding the GUI values): 'setext fit' (else .fits/.fts names), 'set32bits' (else
+        /// force_16bit=true saves masters, pp_ frames and the OIII result as 16-bit integers, clipping negative
+        /// calibrated values to 0; only stack -32b overrides it) and 'setcompress 0' (else masters and results become
+        /// .fit.fz, which the -dark= template, the validator and the result collection do not look for).
+        /// </summary>
+        internal static void PinOutputFormat(SirilScriptBuilder b) {
+            b.Command("setext", "fit");
+            b.Command("set32bits");
+            b.Command("setcompress", "0");
+        }
+
         private static void Header(SirilScriptBuilder b, SirilPreprocessingPlan plan, string wd) {
             b.Comment("############################################");
             b.Comment($"NINA-mac Siril preprocessing: {plan.Title ?? Path.GetFileName(wd)}");
@@ -401,7 +423,7 @@ namespace NINA.Mac.Siril {
                 EnsureSirilSafeDirectory(Path.GetDirectoryName(plan.MasterDarkPathTemplate), "master-dark library");
             }
             if (plan.FlatCalibration == FlatCalibration.SyntheticOffset && (!plan.SyntheticOffsetMultiplier.HasValue || plan.SyntheticOffsetMultiplier.Value <= 0)) {
-                throw new ArgumentException("FlatCalibration.SyntheticOffset needs a positive SyntheticOffsetMultiplier (measure it once from biases)");
+                throw new ArgumentException("FlatCalibration.SyntheticOffset needs a positive whole SyntheticOffsetMultiplier (measure it once from biases and round it)");
             }
             if (plan.Mode == ProcessingMode.HaOIII && plan.Registration == RegistrationReference.TwoPass) {
                 throw new NotSupportedException("Ha/OIII extraction aligns the two stacks with shifts only, so both must share one reference: use FirstFrame or MiddleFrame");

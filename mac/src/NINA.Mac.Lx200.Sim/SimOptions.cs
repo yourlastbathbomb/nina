@@ -106,6 +106,15 @@ namespace NINA.Mac.Lx200.Sim {
         /// <summary>Byte shown by ":D#" while slewing (0x7F, '|' or 0xFF have been seen).</summary>
         public byte DistanceBar { get; set; } = 0x7F;
 
+        /// <summary>
+        /// Seconds after ":MS#" before ":D#" shows the bar (0 = at once): a bar that lags the start of the goto, the
+        /// case Meade.net's minimum slewing time covers (RVM MNT-04). Longer than the slew = the bar never shows.
+        /// </summary>
+        public double DistanceBarDelaySeconds { get; set; }
+
+        /// <summary>Answer NAK (busy) to every halt (":Q#", ":Qn/s/e/w#", ":FQ#") and keep moving.</summary>
+        public bool HaltsNaked { get; set; }
+
         /// <summary>OTA temperature for ":fT#"; null means the command is not answered.</summary>
         public double? OtaTemperatureC { get; set; } = 21.5;
 
@@ -186,6 +195,8 @@ namespace NINA.Mac.Lx200.Sim {
             "align-lost=true|false         :AL#/:AA# drops the alignment",
             "nak-every=N  garbage-every=N  trailing-every=N",
             "slew=S                        goto duration in seconds",
+            "bar-delay=S                   :D# shows no bar for the first S seconds of a goto",
+            "halt-nak=true|false           answer NAK to every halt (:Q#, :Qn/s/e/w#, :FQ#) and keep moving",
             "planetary=S                   busy (NAK) time after :SC",
             "clock-error=S                 mount clock minus UTC"
         };
@@ -198,23 +209,39 @@ namespace NINA.Mac.Lx200.Sim {
             return this;
         }
 
+        /// <summary>Applies one "key=value" quirk. A bad key or value throws <see cref="ArgumentException"/> naming it.</summary>
         public SimOptions Apply(string quirk) {
-            var i = quirk.IndexOf('=');
+            var i = quirk?.IndexOf('=') ?? -1;
             if (i <= 0) {
                 throw new ArgumentException($"Quirk '{quirk}' is not key=value");
             }
             var key = quirk[..i].Trim().ToLowerInvariant();
             var v = quirk[(i + 1)..].Trim();
-            var inv = CultureInfo.InvariantCulture;
+            var lower = v.ToLowerInvariant();
+            T Pick<T>(params (string Name, T Value)[] choices) {
+                foreach (var (name, value) in choices) {
+                    if (lower == name) {
+                        return value;
+                    }
+                }
+                throw new ArgumentException($"{key}={v}? (one of {string.Join(", ", choices.Select(c => c.Name))})");
+            }
+            bool Bool() => Pick(("true", true), ("false", false));
+            double Number() => double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) && double.IsFinite(d)
+                ? d
+                : throw new ArgumentException($"{key}={v}? (a number)");
+            double Seconds() => Number() is var s && s >= 0 ? s : throw new ArgumentException($"{key}={v}? (seconds, 0 or more)");
+            int Count() => int.TryParse(v, NumberStyles.None, CultureInfo.InvariantCulture, out var n)
+                ? n
+                : throw new ArgumentException($"{key}={v}? (a whole number, 0 = never)");
             switch (key) {
-                case "firmware": Firmware = v; break;
-                case "degree": DegreeByte = v.ToLowerInvariant() is "star" or "*" ? (byte)'*' : (byte)0xDF; break;
-                case "seconds-sep": SecondsSeparator = v.ToLowerInvariant() is "colon" or ":" ? ':' : '\''; break;
-                case "long": StartInLongFormat = bool.Parse(v); break;
-                case "hp": HighPrecisionPointing = bool.Parse(v); break;
+                case "firmware": Firmware = v.Length > 0 ? v : throw new ArgumentException("firmware= needs a value such as 4.2g"); break;
+                case "degree": DegreeByte = Pick(("df", (byte)0xDF), ("0xdf", (byte)0xDF), ("star", (byte)'*'), ("*", (byte)'*')); break;
+                case "seconds-sep": SecondsSeparator = Pick(("apostrophe", '\''), ("'", '\''), ("colon", ':'), (":", ':')); break;
+                case "long": StartInLongFormat = Bool(); break;
+                case "hp": HighPrecisionPointing = Bool(); break;
                 case "gw":
-                    GwSupported = v != "none";
-                    GwHasHash = v == "hash";
+                    (GwSupported, GwHasHash) = Pick(("none", (false, false)), ("nohash", (true, false)), ("hash", (true, true)));
                     break;
                 case "pulse":
                     PulseGuide = v.ToLowerInvariant() switch {
@@ -232,19 +259,21 @@ namespace NINA.Mac.Lx200.Sim {
                         _ => throw new ArgumentException($"two-axis={v}?")
                     };
                     break;
-                case "date": ScDate = v.ToLowerInvariant() == "local" ? DateConvention.Local : DateConvention.Utc; break;
-                case "gc": GcFollowsScConvention = v.ToLowerInvariant() != "local"; break;
-                case "lon": LongitudeFormat = v.ToLowerInvariant() == "west360" ? LongitudeReadback.West360 : LongitudeReadback.SignedEastNegative; break;
-                case "temp": OtaTemperatureC = v.ToLowerInvariant() == "none" ? null : double.Parse(v, inv); break;
-                case "fp": FocusPulseSupported = bool.Parse(v); break;
-                case "halt-miss": FirstFocusHaltIgnored = bool.Parse(v); break;
-                case "align-lost": AlignmentLostOnLandMode = bool.Parse(v); break;
-                case "nak-every": NakEveryNth = int.Parse(v, inv); break;
-                case "garbage-every": GarbageEveryNth = int.Parse(v, inv); break;
-                case "trailing-every": TrailingGarbageEveryNth = int.Parse(v, inv); break;
-                case "slew": SlewSeconds = double.Parse(v, inv); break;
-                case "planetary": PlanetaryUpdateSeconds = double.Parse(v, inv); break;
-                case "clock-error": ClockErrorSeconds = double.Parse(v, inv); break;
+                case "date": ScDate = Pick(("utc", DateConvention.Utc), ("local", DateConvention.Local)); break;
+                case "gc": GcFollowsScConvention = Pick(("follow", true), ("local", false)); break;
+                case "lon": LongitudeFormat = Pick(("signed", LongitudeReadback.SignedEastNegative), ("west360", LongitudeReadback.West360)); break;
+                case "temp": OtaTemperatureC = lower == "none" ? null : Number(); break;
+                case "fp": FocusPulseSupported = Bool(); break;
+                case "halt-miss": FirstFocusHaltIgnored = Bool(); break;
+                case "align-lost": AlignmentLostOnLandMode = Bool(); break;
+                case "nak-every": NakEveryNth = Count(); break;
+                case "garbage-every": GarbageEveryNth = Count(); break;
+                case "trailing-every": TrailingGarbageEveryNth = Count(); break;
+                case "slew": SlewSeconds = Seconds(); break;
+                case "bar-delay": DistanceBarDelaySeconds = Seconds(); break;
+                case "halt-nak": HaltsNaked = Bool(); break;
+                case "planetary": PlanetaryUpdateSeconds = Seconds(); break;
+                case "clock-error": ClockErrorSeconds = Number(); break;
                 default: throw new ArgumentException($"Unknown simulator quirk '{key}'");
             }
             return this;

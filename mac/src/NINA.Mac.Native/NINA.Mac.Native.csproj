@@ -13,8 +13,10 @@
   <!--
     JPL DE421 ephemeris for NOVAS (the JPLEPH blob from nina.external, kept uncommitted in mac/native/ephemeris).
     Upstream NOVAS.cs opens Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "External", "JPLEPH"), so it goes to
-    <output>/External/JPLEPH. In an .app bundle BaseDirectory is Contents/MacOS; packaging has to deal with that
-    (data files belong in Contents/Resources).
+    <output>/External/JPLEPH. In an .app bundle BaseDirectory is Contents/MacOS, so Contents/MacOS/External/JPLEPH must exist,
+    as the file or as a relative symlink into Contents/Resources (the same applies to Database/ for the catalogue SQL).
+    A missing ephemeris does not make NOVAS fail: Moon and planet positions come back NaN or wrong. Hosts call
+    NINA.Astrometry.Mac.EngineData.EnsureAvailable() at startup. See ../README-engine.md.
   -->
   <ItemGroup Condition="Exists('$(MacEphemeris)')">
     <None Include="$(MacEphemeris)" Link="External/JPLEPH" CopyToOutputDirectory="PreserveNewest" Visible="false" />
@@ -29,7 +31,7 @@
   </Target>
 
   <Target Name="WarnMissingEphemeris" BeforeTargets="Build" Condition="!Exists('$(MacEphemeris)')">
-    <Warning Text="mac/native/ephemeris/JPLEPH (JPL DE421) is missing; NOVAS will run without its planetary ephemeris." />
+    <Warning Text="mac/native/ephemeris/JPLEPH (JPL DE421) is missing. NOVAS does not fail without it: Moon and planet positions come back NaN or silently wrong, and EngineData.EnsureAvailable() throws." />
   </Target>
 
 </Project>

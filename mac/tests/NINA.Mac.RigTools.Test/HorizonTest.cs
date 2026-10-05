@@ -102,8 +102,10 @@ namespace NINA.Mac.RigTools.Test {
         }
 
         [TestCase("0 60\n60 60\n60.1 25\n90 15\n135 6\n180 4\n225 6\n270 15\n299.9 25\n300 60\n360 60\n", TestName = "Parity: corrected research template")]
-        [TestCase("10 5\n200 20\n350 8\n", TestName = "Parity: neither 0 nor 360 (nearest to 360 wins)")]
+        [TestCase("10 5\n200 20\n350 8\n", TestName = "Parity: neither 0 nor 360 (tie, nearest to 0 wins)")]
+        [TestCase("30 5\n200 20\n350 8\n", TestName = "Parity: neither 0 nor 360 (nearest to 360 wins)")]
         [TestCase("30 5\n200 20\n300 8\n", TestName = "Parity: neither 0 nor 360 (nearest to 0 wins)")]
+        [TestCase("15 10\n30 10\n60 15\n90 15\n180 4\n270 15\n300 60\n330 60\n345 60\n", TestName = "Parity: neither 0 nor 360, wall across north (review F1)")]
         [TestCase("0 12\n180 3\n", TestName = "Parity: only 0")]
         [TestCase("90 15\n360 40\n", TestName = "Parity: only 360")]
         [TestCase("0\t10\n45,20\n90;30\n  135   25  \n180 10\n", TestName = "Parity: all four separators")]
@@ -122,6 +124,60 @@ namespace NINA.Mac.RigTools.Test {
             foreach (var az in new[] { -1e-14, -2.842170943040401e-14, -1e-300, double.NaN, double.PositiveInfinity, double.NegativeInfinity }) {
                 ours.GetAltitude(az).Should().Be(upstream.GetAltitude_ProposedPatch(az), $"azimuth {az:R}");
             }
+        }
+
+        /// <summary>Measured every 15 deg but starting at 15: a 60 deg wall from 300 to 345, 10 deg from 15.</summary>
+        private const string NoNorthPointFile = "15 10\n30 10\n60 15\n90 15\n180 4\n270 15\n300 60\n330 60\n345 60\n";
+
+        [Test]
+        public void MissingZeroAnd360_KeepsUpstreamAltitudesButWarns() {
+            // Review F1: upstream grooming copies the altitude at 15 (10 deg) to both 0 and 360 instead of joining
+            // 345 (60 deg) to 15 (10 deg) across north, so the wall reads up to 25 deg too low just west of north.
+            var result = Parse(NoNorthPointFile);
+            var upstream = Upstream(NoNorthPointFile);
+
+            // Parity is kept (the parity test above covers every 0.25 deg), including the under-reported values.
+            result.Profile.Points.Select(p => p.AzimuthDeg).Should().Equal(upstream.Azimuths);
+            result.Profile.GetAltitude(355).Should().BeApproximately(60 - 50 * 10 / 15.0, 1e-9).And.Be(upstream.GetAltitude(355));
+            result.Profile.GetAltitude(0).Should().Be(10);
+
+            // ...but it is no longer silent.
+            result.RejectedLines.Should().BeEmpty();
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.LineNumber.Should().Be(0);
+            warning.Line.Should().BeEmpty();
+            warning.Reason.Should().Be("file has no point at azimuth 0 or 360: both get 10°, copied from azimuth 15 as upstream NINA does, " +
+                                       "so the horizon between azimuth 345 and 15 is not interpolated across north " +
+                                       "(a straight line would give 35° at azimuth 0); add a point at 0 or 360");
+            warning.ToString().Should().Be(warning.Reason, "a whole-file warning has no line to quote");
+        }
+
+        [TestCase("15 50\n180 4\n345 30\n", "both get 50°, copied from azimuth 15 ", "would give 40° at azimuth 0", TestName = "Wrap warning: over-blocks (tie goes to the 0 side)")]
+        [TestCase("30 5\n200 20\n350 8\n", "both get 8°, copied from azimuth 350 ", "would give 7.25° at azimuth 0", TestName = "Wrap warning: nearest to 360 wins")]
+        public void MissingZeroAnd360_WarningNamesTheCopiedAltitudeAndTheStraightLine(string text, string copied, string straight) {
+            var result = Parse(text);
+
+            result.Warnings.Should().ContainSingle().Which.Reason.Should().Contain(copied).And.Contain(straight);
+            // The copied altitude is what upstream reads at 0 and 360.
+            var upstream = Upstream(text);
+            result.Profile.GetAltitude(0).Should().Be(upstream.GetAltitude(0));
+            result.Profile.GetAltitude(359.999).Should().Be(upstream.GetAltitude(359.999));
+        }
+
+        [TestCase("0 12\n180 3\n", TestName = "No wrap warning: only 0")]
+        [TestCase("90 15\n360 40\n", TestName = "No wrap warning: only 360")]
+        [TestCase("-0 12\n180 3\n", TestName = "No wrap warning: -0 counts as 0")]
+        [TestCase("0 60\n180 4\n360 60\n", TestName = "No wrap warning: both")]
+        public void ZeroOr360Present_GivesNoWrapWarning(string text) {
+            Parse(text).Warnings.Should().BeEmpty();
+        }
+
+        [Test]
+        public void Mw4_MissingZeroAnd360_WarnsToo() {
+            var result = HorizonFile.ParseMw4(new StringReader("[[10, 15], [4, 180], [60, 345]]"), "site.hpts");
+
+            result.Warnings.Should().ContainSingle().Which.Reason.Should().StartWith("file has no point at azimuth 0 or 360: both get 10°, copied from azimuth 15 ");
+            HorizonFile.ParseMw4(new StringReader("[[10, 0], [4, 180]]"), "site.hpts").Warnings.Should().BeEmpty();
         }
 
         [Test]
@@ -304,6 +360,7 @@ namespace NINA.Mac.RigTools.Test {
             placeholder.IsPlaceholder.Should().BeTrue();
             text.Should().Contain("PLACEHOLDER");
             Parse(text).RejectedLines.Should().BeEmpty();
+            Parse(text).Warnings.Should().BeEmpty();
             placeholder.GetAltitude(0).Should().Be(60);
             placeholder.GetAltitude(330).Should().Be(60);
             placeholder.GetAltitude(30).Should().Be(60);

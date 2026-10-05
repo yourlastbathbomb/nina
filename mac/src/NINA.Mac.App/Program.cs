@@ -13,6 +13,7 @@
 #endregion "copyright"
 
 using Avalonia;
+using NINA.Mac.App.Diagnostics;
 using System;
 using System.Linq;
 
@@ -22,7 +23,10 @@ namespace NINA.Mac.App {
 
         /// <summary>
         /// Entry point. <c>--smoke-test</c> initialises every app service and renders every screen headlessly, then
-        /// exits (0 = pass), without showing a window. <c>--version</c> prints the version.
+        /// exits (0 = pass), without showing a window. <c>--startup-check</c> sets up the real Avalonia.Native platform
+        /// and lays out the main window without showing it (the smoke test runs it in a child process).
+        /// <c>--gui-smoke</c> is a normal launch that shows the main window for a few seconds, checks it and quits.
+        /// <c>--version</c> prints the version.
         /// </summary>
         [STAThread]
         public static int Main(string[] args) {
@@ -34,14 +38,26 @@ namespace NINA.Mac.App {
             if (args.Contains("--smoke-test")) {
                 return SmokeTest.Run(args, Console.Out);
             }
+            if (args.Contains(StartupCheck.Flag)) {
+                return StartupCheck.Run(Console.Out);
+            }
+            if (args.Contains(GuiSmoke.Flag)) {
+                return GuiSmoke.Run(args, Console.Out, TimeSpan.FromSeconds(45));
+            }
             return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
 
-        /// <summary>Desktop app builder (also used by the Avalonia previewer).</summary>
+        /// <summary>
+        /// Desktop app builder (also used by the Avalonia previewer, <c>--startup-check</c> and <c>--gui-smoke</c>). It is what
+        /// Avalonia.Desktop's UsePlatformDetect() picks on macOS: AppKit windowing, Skia rendering and HarfBuzz text
+        /// shaping. Without UseHarfBuzz() AppBuilder.Setup() throws "No text shaping system configured" on launch;
+        /// Avalonia.Headless registers HarfBuzz itself, so only --startup-check and --gui-smoke cover this.
+        /// </summary>
         public static AppBuilder BuildAvaloniaApp() =>
             AppBuilder.Configure<App>()
                 .UseAvaloniaNative()
                 .UseSkia()
+                .UseHarfBuzz()
                 .With(new MacOSPlatformOptions { ShowInDock = true })
                 .LogToTrace();
     }

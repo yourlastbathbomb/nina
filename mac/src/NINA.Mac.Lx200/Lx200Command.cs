@@ -144,16 +144,26 @@ namespace NINA.Mac.Lx200 {
                 }
             }
             var body = Lx200Format.Latin1.GetString(bytes, 1, bytes.Length - 2);
-            var spec = Lx200Catalog.Match(body);
             // ':' is legal inside arguments (":SL01:00:00#"), but if a firmware restarted its parser at an inner ':'
-            // then ":Q:hP#" would park the mount. Treat any inner segment that matches a blocked code as blocked.
-            for (var i = body.IndexOf(':'); i >= 0 && spec?.IsBlocked != true; i = body.IndexOf(':', i + 1)) {
+            // then ":Q:hP#" would park the mount; and no command code has a space, but a parser that skipped spaces
+            // would read ": hP#" as ":hP#". Any of those readings that hits a blocked code blocks the whole command.
+            var spec = BlockedReading(body) ?? BlockedReading(body.Replace(" ", "", StringComparison.Ordinal)) ?? Lx200Catalog.Match(body);
+            return new Lx200Command(bytes, body, spec);
+        }
+
+        /// <summary>The blocked catalog entry that <paramref name="body"/> or any segment after an inner ':' starts with, or null.</summary>
+        private static Lx200CommandSpec BlockedReading(string body) {
+            var whole = Lx200Catalog.Match(body);
+            if (whole?.IsBlocked == true) {
+                return whole;
+            }
+            for (var i = body.IndexOf(':'); i >= 0; i = body.IndexOf(':', i + 1)) {
                 var inner = Lx200Catalog.Match(body[(i + 1)..]);
                 if (inner?.IsBlocked == true) {
-                    spec = inner;
+                    return inner;
                 }
             }
-            return new Lx200Command(bytes, body, spec);
+            return null;
         }
     }
 }

@@ -46,6 +46,8 @@ namespace NINA.Mac.Lx200Probe {
             ["Mw"] = "Moves the mount until :Qw# or .stop.",
             ["F+"] = "Runs the focuser until :FQ# or .stop.",
             ["F-"] = "Runs the focuser until :FQ# or .stop.",
+            ["FP"] = "Runs the focuser for the given milliseconds, timed by the mount (+ = inward). .stop sends :FQ#.",
+            ["Mg"] = "Pulse-guides the mount for the given milliseconds at the guide rate; it stops by itself. .stop sends :Q#.",
             ["hI"] = "Answers the startup daylight-saving/date/time prompt with this date and time.",
             ["Rg"] = "Changes the guide rate (handbox guide-rate setting)."
         };
@@ -60,8 +62,10 @@ namespace NINA.Mac.Lx200Probe {
             this.token = token;
         }
 
+        /// <summary>Returns 0, or 1 when the stop commands at the end were not all accepted.</summary>
         public int Run() {
             Help();
+            var exit = 0;
             try {
                 while (!token.IsCancellationRequested) {
                     ask.Console.Write("lx200> ");
@@ -84,10 +88,13 @@ namespace NINA.Mac.Lx200Probe {
             } finally {
                 if (link.MotionCommanded) {
                     ask.Say("Motion was commanded in this session: sending stop commands.");
-                    link.StopAll("raw console exit");
+                    if (!link.StopAll("raw console exit")) {
+                        ask.Alarm(Prompter.StopNotAccepted);
+                        exit = 1;
+                    }
                 }
             }
-            return 0;
+            return exit;
         }
 
         private void Help() {
@@ -114,8 +121,11 @@ namespace NINA.Mac.Lx200Probe {
                     ask.Say(".quit                 leave (sends stops if anything moved)");
                     return true;
                 case ".stop":
-                    link.StopAll("operator .stop");
-                    ask.Say("Stop commands sent.");
+                    if (link.StopAll("operator .stop")) {
+                        ask.Say("Stop commands sent.");
+                    } else {
+                        ask.Alarm(Prompter.StopNotAccepted);
+                    }
                     return true;
                 case ".resync":
                     ask.Say(link.Resync() ? "Resync OK." : "Resync FAILED: no sane answer to ACK.");
@@ -168,7 +178,7 @@ namespace NINA.Mac.Lx200Probe {
                     : $"{cmd.Spec.Purpose} ({cmd.Effect}).";
                 var key = cmd.Spec?.Code ?? "";
                 if (key.StartsWith("Mg", StringComparison.Ordinal)) {
-                    key = "Mn";
+                    key = "Mg";
                 }
                 var warning = Warnings.TryGetValue(key, out var w) ? "\n  " + w : "";
                 if (!ask.Confirm($"{cmd.Text}: {what}{warning}")) {

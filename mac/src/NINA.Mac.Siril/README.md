@@ -5,7 +5,7 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
 | Type | What it does |
 |---|---|
 | `SessionLayout` | Builds the per-night folder tree and routes each frame (`FrameInfo`) to its folder and file name |
-| `NinaFilePatterns` | NINA profile file patterns that write the same tree. Also a port of `ImagePatterns.GetImageFileString` with the proposed upstream fix (split on `/` and `\`, plus `$$IMAGETYPEDIR$$`) |
+| `NinaFilePatterns` | NINA profile file patterns that write the same tree for target names NINA sanitises the same way (`SessionLayout.KeepsNinaFolderName`). Also a port of `ImagePatterns.GetImageFileString` with the proposed upstream fix (split on `/` and `\`, plus `$$IMAGETYPEDIR$$`) |
 | `SirilPathTemplate` | Siril 1.4 header tokens (`$EXPTIME:%d$`, `%f`, `%s`, `dmN`), resolved the same way siril-cli resolves them |
 | `DarkLibrary` | Scans the raw-dark sets and builds masters with siril-cli. Siril names each master from the token template |
 | `SirilScriptGenerator` | Generates a per-target script equivalent to `OSC_Preprocessing` v1.4, or `OSC_Extract_HaOIII` v1.5 on dual-band nights |
@@ -33,6 +33,7 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
 
 - **Night rollover.** The night changes at local noon (HKT), like NINA's `$$DATEMINUS12$$`, not at midnight.
 - **Dark flats.** NINA 3 types dark flats as `DARK`. The engine must set `FrameInfo.IsDarkFlat` so they go to `biases/`.
+- **Save through `SessionLayout.GetFramePath`.** The `NinaFilePatterns` profile patterns give the same paths only when `SessionLayout.KeepsNinaFolderName(target)` is true. NINA keeps `:`, `"`, `$`, control characters and a leading `.` in target folder names (on macOS `CoreUtil.ReplaceAllInvalidFilenameChars` only maps `\`, `/` and `\0`), while the layout replaces them because they break Siril scripts. NINA also writes the lights of an untitled target to `<night>/lights` instead of `<night>/untitled/lights`. Frames saved by stock patterns for such targets end up where `GetTargetFolders` does not look.
 - **Master-dark template.** The template is `dark_$EXPTIME:%d$s_G$GAIN:%d$_O$OFFSET:%d$_T$SET-TEMP:%d$_B$XBINNING:%d$.fit`.
   - Lights are calibrated with `"-dark=<library>/masters/<template>"`. Siril fills the tokens from the first light's header.
   - If no master matches, Siril stops the script at `calibrate` (exit code 1). The validator reports the same problem before the run.
@@ -42,12 +43,17 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
   - Registration on the middle frame (`setref` followed by one-pass `register`), which keeps the mid-session orientation for alt-az.
   - Stacking: `stack rej 3 3 -norm=addscale -output_norm -rgb_equal -32b`, then `mirrorx -bottomup`.
 - **Script options:**
-  - `FlatCalibration.SyntheticOffset`: uses `"-bias==N*$OFFSET"`. Measure N once from biases.
+  - `FlatCalibration.SyntheticOffset`: uses `"-bias==N*$OFFSET"`. Measure N once from biases and round it: N is an `int`, because siril-cli 1.4.4 aborts `calibrate` on a fractional multiplier. The rounding leaves at most OFFSET/2 ADU of pedestal.
   - `RegistrationReference.TwoPass` with `Framing.Min/Max/Cog`.
   - `DarkSource.Folder`: the stock darks/ step.
   - `ProcessingMode.HaOIII`.
 - **siril-cli config.** siril-cli writes `wd=` and every `set` into the ini it loaded. The runner therefore copies the GUI config (`~/Library/Application Support/org.siril.Siril/siril/config.1.4.ini`, read only) to `~/Library/Application Support/NINA-mac/siril/siril-cli.ini` before each run and passes that copy with `-i`.
-- **Pinned extension.** Scripts start with `setext fit` so that master names do not depend on the user's extension preference.
+- **Pinned output format.** Every generated script (preprocessing and master darks) starts with `setext fit`, `set32bits` and `setcompress 0`. The runner seeds its ini from the GUI config, so without these lines the GUI preferences would decide the output format:
+  - `extension`: master names would no longer be `.fit`.
+  - `force_16bit=true`, which is set in William's GUI config: masters, `pp_` frames and the OIII result would be saved as 16-bit integers, with negative calibrated values clipped to 0. Only `stack -32b` overrides this preference.
+  - `[compression] enabled=true`: masters and results would be written as `.fit.fz`, which the `-dark=` template, the validator and the result collection do not look for.
+
+  These `set` commands land only in the runner's own ini.
 
 ## Siril 1.4.4 behaviour verified here (siril-cli on this Mac)
 
@@ -56,6 +62,11 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
 - **`%s` drops apostrophes.** Siril shell-unquotes the raw FITS string, so `'Thor''s Helmet'` becomes `Thors_Helmet`.
 - **A script without a leading `requires` is skipped.** siril-cli still prints "Script execution finished successfully" and exits 0, so the runner refuses such scripts.
 - **`-i` must name an existing file.** siril-cli exits 1 if the file is missing. An empty file gives Siril's defaults.
+- **The synthetic-offset multiplier must be a positive whole number.**
+  - `-bias==16*$OFFSET` and `17*$OFFSET` work.
+  - `16.5*$OFFSET`, `15.75*$OFFSET`, `16.0*$OFFSET` and `0*$OFFSET` fail at `calibrate`, logging "The offset value could not be parsed from expression".
+  - A plain level such as `-bias==800` works, but is read as an integer prefix: `812.5` gives 812 and `1e3` gives 1.
+- **Preferences apply wherever a command has no flag for them.** With the GUI's `force_16bit=true`, `bias_stacked`, `pp_flat_stacked`, `pp_light` and `r_pp_light` came out as BITPIX 16, and so did the PixelMath OIII result. With compression on, every output came out as `.fit.fz`. `set32bits` and `setcompress 0` restore BITPIX -32 and `.fit`. Besides paths, `force_16bit` is the only processing setting in which William's GUI config differs from Siril's defaults (star-finder optics, the photometry gain and the update check differ too).
 - **`seqextract_HaOIII -resample=ha` upsamples Ha to full frame size.** The research (SIR-14) said the result would be half size. On the test data, both Ha and OIII results came out at the light-frame size.
 - **Stock-mode output matches the stock script exactly.** With stock folders, the generated script produces a stack identical (max difference 0) to the installed `OSC_Preprocessing.ssf`.
 
@@ -75,11 +86,14 @@ mac/dotnet test  mac/tests/NINA.Mac.Siril.Test/NINA.Mac.Siril.Test.csproj
   - The flux ratio of a corner star to a centre star.
   - The background offsets between corner and centre, and between left and right, in the stack.
   - The R/G/B sky ratios and flatness in the calibrated lights.
-  - The same metrics for an uncalibrated control run.
+  - The master flat's corner/centre ratio per CFA channel against the rig's vignetting model. This is the check that sees a pedestal left in the flats: raw flats measure +1.2/+1.8/+3.6 % (R/G/B) against a 0.4 % tolerance, while the stack metrics barely move.
+  - The same metrics for uncalibrated and raw-flat control runs.
   - Synthetic-offset and two-pass/min variants.
   - Ha/OIII output.
   - Aborts on exposure and gain mismatch.
   - Equivalence with the stock script.
+  - A run seeded with GUI-style preferences (`.fits`, `force_16bit=true`, compression on), written by the test. All outputs must still be `.fit` at BITPIX -32. A control run with the pins removed shows that these preferences do take effect.
+- **`SyntheticOffsetTest`.** It runs the generated flat step with N = 17 in siril-cli, and pins Siril's rejection of a fractional N.
 
 ## Use from the engine
 

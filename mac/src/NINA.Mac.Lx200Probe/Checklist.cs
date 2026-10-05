@@ -16,6 +16,7 @@ using NINA.Mac.Lx200;
 using NINA.Mac.Lx200.Sim;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -50,6 +51,18 @@ namespace NINA.Mac.Lx200Probe {
 
         public double GotoTimeoutSeconds { get; set; } = 180;
 
+        /// <summary>
+        /// A null :D# reply this soon after :MS# answered '0' still counts as slewing: the bar can lag the start of the
+        /// goto (RVM MNT-04 rec; Meade.net Telescope.cs:3290-3310 counts a minimum time as slewing).
+        /// </summary>
+        public double MinimumSlewSeconds { get; set; } = 1.5;
+
+        /// <summary>
+        /// The step 5 sync (:CM#) is only sent when the mount's own position is this close to the goto target; farther
+        /// off, the goto did not really end there and a sync would put a wrong point into the pointing model.
+        /// </summary>
+        public double SyncGuardArcsec { get; set; } = 600;
+
         public double SettleSeconds { get; set; } = 0.7;
 
         public double DistancePollSeconds { get; set; } = 0.5;
@@ -69,12 +82,22 @@ namespace NINA.Mac.Lx200Probe {
     public sealed partial class Checklist {
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
+        /// <summary>
+        /// Step 4 (the opt-in date test) runs last: it destroys the alignment that steps 5-8 rely on (goto and sync,
+        /// tracking), so a full run with --date-test still gets meaningful results from them.
+        /// </summary>
+        private static readonly int[] ExecutionOrder = { 1, 2, 3, 5, 6, 7, 8, 4 };
+
+        /// <summary>How long a halt the mount refuses (NAK) is resent before the run stops with a warning.</summary>
+        private static readonly TimeSpan HaltRetryTime = TimeSpan.FromSeconds(3);
+
         private readonly Lx200Connection link;
         private readonly Prompter ask;
         private readonly ChecklistOptions opt;
         private readonly CancellationToken token;
         private readonly AutostarSimulator sim;
         private StepRecord current;
+        private volatile bool restorePending;
 
         // facts learned by earlier steps
         private CoordinatePrecision? precision;
@@ -94,7 +117,13 @@ namespace NINA.Mac.Lx200Probe {
 
         public string ResultsPath { get; private set; }
 
-        /// <summary>Runs every step; returns 0 when all ran, 1 when any failed, 130 when aborted.</summary>
+        /// <summary>
+        /// True while the mount clock holds the date test's simulated date: from the first :SL until the real date and
+        /// time are written back. Stopping the process then would leave the mount on the wrong date.
+        /// </summary>
+        public bool RestorePending => restorePending;
+
+        /// <summary>Runs every step; returns 0 when all ran, 1 when any failed or a stop was refused, 130 when aborted.</summary>
         public int Run() {
             Directory.CreateDirectory(opt.OutputDirectory);
             ResultsPath = Path.Combine(opt.OutputDirectory, "results.md");
@@ -122,9 +151,13 @@ namespace NINA.Mac.Lx200Probe {
 
             link.Transacted += OnTransacted;
             var exit = 0;
+            var stopRefused = false;
+            var order = ExecutionOrder.Select(n => Array.FindIndex(steps, s => s.Number == n)).ToArray();
             try {
-                for (var i = 0; i < steps.Length; i++) {
+                for (var k = 0; k < order.Length; k++) {
+                    var i = order[k];
                     var rec = records[i];
+                    var later = order.Skip(k + 1).Select(j => records[j]);
                     if (opt.Skip.Contains(rec.Number)) {
                         rec.Outcome = StepOutcome.Skipped;
                         rec.Summary = "skipped (--skip)";
@@ -142,27 +175,27 @@ namespace NINA.Mac.Lx200Probe {
                         }
                     } catch (OperationCanceledException) {
                         rec.Outcome = StepOutcome.Aborted;
-                        rec.Summary = "aborted (Ctrl+C)";
+                        rec.Summary = WithPrevious("aborted (Ctrl+C or a signal)", rec.Summary);
                         throw;
                     } catch (ChecklistAbortException ex) {
                         rec.Outcome = StepOutcome.Failed;
-                        rec.Summary = ex.Message;
+                        rec.Summary = WithPrevious(ex.Message, rec.Summary);
                         rec.Conclusions.Add(ex.Message);
                         exit = 1;
-                        StopIfMoving(rec, "checklist stopped");
-                        foreach (var later in records.Skip(i + 1).Where(r => r.Outcome == StepOutcome.NotRun)) {
-                            later.Summary = "not run: " + ex.Message;
+                        stopRefused |= !StopIfMoving(rec, "checklist stopped");
+                        foreach (var r in later.Where(r => r.Outcome == StepOutcome.NotRun)) {
+                            r.Summary = "not run: " + ex.Message;
                         }
                         break;
                     } catch (Exception ex) {
                         rec.Outcome = StepOutcome.Failed;
-                        rec.Summary = $"failed: {ex.Message}";
+                        rec.Summary = WithPrevious($"failed: {ex.Message}", rec.Summary);
                         rec.Notes.Add($"Exception {ex.GetType().Name}: {ex.Message}");
                         exit = 1;
-                        StopIfMoving(rec, $"step {rec.Number} failed");
+                        stopRefused |= !StopIfMoving(rec, $"step {rec.Number} failed");
                         if (ex is Lx200DisconnectedException) {
-                            foreach (var later in records.Skip(i + 1)) {
-                                later.Summary = "not run: link lost";
+                            foreach (var r in later) {
+                                r.Summary = "not run: link lost";
                             }
                             break;
                         }
@@ -179,21 +212,42 @@ namespace NINA.Mac.Lx200Probe {
             } finally {
                 link.Transacted -= OnTransacted;
                 if (link.MotionCommanded) {
-                    link.StopAll("checklist finished or aborted after motion");
-                    Document.Changes.Add("Stop commands (:Q#, :Qn/s/e/w#, :FQ# twice) were sent at the end because motion had been commanded.");
+                    if (link.StopAll("checklist finished or aborted after motion")) {
+                        Document.Changes.Add("Stop commands (:Q#, :Qn/s/e/w#, :FQ# twice) were sent at the end because motion had been commanded.");
+                    } else {
+                        stopRefused = true;
+                        Document.Changes.Add("STOP COMMANDS NOT ACCEPTED at the end (:Q#, :Qn/s/e/w#, :FQ# twice; NAK or no link, see trace.log): the mount or the focuser may still have been moving. Switch the mount off before anything else.");
+                    }
                 }
                 Save();
+            }
+            if (exit == 0 && (stopRefused || records.Any(r => r.Outcome == StepOutcome.Failed))) {
+                exit = 1;
+            }
+            if (stopRefused) {
+                ask.Alarm(Prompter.StopNotAccepted);
             }
             ask.Say("");
             ask.Say($"Results: {ResultsPath}");
             return exit;
         }
 
-        private void StopIfMoving(StepRecord rec, string reason) {
-            if (link.MotionCommanded) {
-                link.StopAll(reason);
-                rec.Notes.Add("Stop commands sent (:Q#, :Qn/s/e/w#, :FQ# twice) because motion had been commanded.");
+        /// <summary>Keeps what a step had already recorded (e.g. the date test's restore result) after the reason it ended.</summary>
+        private static string WithPrevious(string reason, string previous) =>
+            string.IsNullOrEmpty(previous) ? reason : $"{reason}: {previous}";
+
+        /// <summary>Sends the stop commands if motion was commanded; false when the mount did not take them all.</summary>
+        private bool StopIfMoving(StepRecord rec, string reason) {
+            if (!link.MotionCommanded) {
+                return true;
             }
+            if (link.StopAll(reason)) {
+                rec.Notes.Add("Stop commands sent (:Q#, :Qn/s/e/w#, :FQ# twice) because motion had been commanded.");
+                return true;
+            }
+            rec.Notes.Add(Prompter.StopNotAccepted);
+            ask.Alarm(Prompter.StopNotAccepted);
+            return false;
         }
 
         private void OnTransacted(Lx200Reply reply) {
@@ -225,6 +279,25 @@ namespace NINA.Mac.Lx200Probe {
                 throw new Lx200ReplyException($"{command}: {r.Status}{(r.Error != null ? " (" + r.Error + ")" : "")}", r);
             }
             return r;
+        }
+
+        /// <summary>
+        /// Sends a halt (:Q#, :Qn#, :FQ#) and makes sure the mount took it. Any command can be refused with NAK while
+        /// the mount is busy (P07 l.10-13), so a refused halt is sent again for up to <see cref="HaltRetryTime"/>; if
+        /// it is still refused the run stops, because the motor may still be running. Sent even after Ctrl+C.
+        /// </summary>
+        private Lx200Reply Halt(string command) {
+            var sw = Stopwatch.StartNew();
+            while (true) {
+                var r = link.Send(command);
+                if (r.Status is ReplyStatus.NoReplyExpected or ReplyStatus.FramingError) {
+                    return r;
+                }
+                if (r.Status == ReplyStatus.Disconnected || sw.Elapsed > HaltRetryTime) {
+                    throw new ChecklistAbortException(string.Create(Inv, $"halt {command} not accepted ({r.Status}, still refused after {sw.Elapsed.TotalSeconds:0.0} s): the mount or the focuser may still be moving. Switch the mount off."));
+                }
+                Thread.Sleep(100);
+            }
         }
 
         private T Read<T>(string command, Func<string, T> parse) {
@@ -272,13 +345,28 @@ namespace NINA.Mac.Lx200Probe {
             return answer;
         }
 
-        private CoordinatePrecision Precision {
-            get {
-                if (!precision.HasValue) {
-                    precision = Lx200Format.DetectPrecision(TxOk(":GR#").Value);
-                }
-                return precision.Value;
+        /// <summary>
+        /// Makes sure replies are in long format (1 s RA, 1" Dec) before a step measures small moves: read :GR#, and if
+        /// it is short, send :U# and read again (RIM MNT-09). Needed when step 2 was skipped, e.g. a pulse-only rerun
+        /// after the mount was power-cycled. :U# only changes the serial format, so no confirmation is needed.
+        /// </summary>
+        private CoordinatePrecision EnsureHighPrecision(StepRecord s) {
+            if (precision == CoordinatePrecision.High) {
+                return CoordinatePrecision.High;
             }
+            var p = Lx200Format.DetectPrecision(TxOk(":GR#").Value);
+            if (p == CoordinatePrecision.Low) {
+                Tx(":U#");
+                p = Lx200Format.DetectPrecision(TxOk(":GR#").Value);
+                s.Notes.Add(p == CoordinatePrecision.High
+                    ? "Replies were in short format, so :U# switched them to long format first (step 2 was not run in this session)."
+                    : ":U# did not switch to long format: positions resolve 1' only, so small moves cannot be measured.");
+                if (p == CoordinatePrecision.High) {
+                    Document.Changes.Add("Coordinate format (:U#): switched to High precision (serial format only).");
+                }
+            }
+            precision = p;
+            return p;
         }
 
         private Pos ReadPos() {
@@ -324,7 +412,7 @@ namespace NINA.Mac.Lx200Probe {
             return $"off by {abs:0} s: the clock or the longitude is wrong";
         }
 
-        private readonly record struct Pos(double Ra, double Dec, double Alt, double Az, DateTime Utc);
+        internal readonly record struct Pos(double Ra, double Dec, double Alt, double Az, DateTime Utc);
 
         /// <summary>Stops the run: nothing after this step can work (no link, no answer to ACK).</summary>
         private sealed class ChecklistAbortException : Exception {

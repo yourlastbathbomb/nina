@@ -13,6 +13,7 @@
 #endregion "copyright"
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace NINA.Mac.Platform {
@@ -88,16 +89,30 @@ namespace NINA.Mac.Platform {
             Directory.CreateDirectory(LogsDirectory);
         }
 
-        /// <summary>A warning when <paramref name="path"/> is inside a folder iCloud may sync (Desktop, Documents, iCloud Drive); otherwise null.</summary>
+        /// <summary>
+        /// Folders below the home directory whose files a sync service may upload and evict: Desktop and Documents
+        /// (iCloud "Desktop &amp; Documents"), iCloud Drive (Library/Mobile Documents) and File Provider roots such as
+        /// OneDrive, Dropbox and Google Drive (Library/CloudStorage).
+        /// </summary>
+        public static readonly IReadOnlyList<string> SyncedFolders = new[] { "Documents", "Desktop", Path.Combine("Library", "Mobile Documents"), Path.Combine("Library", "CloudStorage") };
+
+        private static string SyncServiceOf(string syncedFolder) =>
+            syncedFolder.EndsWith("CloudStorage", StringComparison.Ordinal) ? "a cloud storage provider (OneDrive, Dropbox, Google Drive...)" : "iCloud";
+
+        /// <summary>
+        /// A warning when <paramref name="path"/> is inside a folder a sync service may upload and evict (see
+        /// <see cref="SyncedFolders"/>); otherwise null. Compared case-insensitively: the home volume is normally
+        /// case-insensitive APFS, so "~/documents" is the synced ~/Documents.
+        /// </summary>
         public string CloudSyncWarning(string path) {
             if (string.IsNullOrWhiteSpace(path)) {
                 return null;
             }
             var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ExpandHome(path, Home)));
-            foreach (var synced in new[] { "Documents", "Desktop", Path.Combine("Library", "Mobile Documents") }) {
+            foreach (var synced in SyncedFolders) {
                 var root = Path.Combine(Home, synced);
-                if (full.Equals(root, StringComparison.Ordinal) || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal)) {
-                    return $"{full} is inside ~/{synced}, which iCloud can sync. Gigabytes of FITS frames will upload and may be evicted to the cloud mid-session; prefer ~/Astro.";
+                if (full.Equals(root, StringComparison.OrdinalIgnoreCase) || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) {
+                    return $"{full} is inside ~/{synced}, which {SyncServiceOf(synced)} can sync. Gigabytes of FITS frames will upload and may be evicted to the cloud mid-session; prefer ~/Astro.";
                 }
             }
             return null;

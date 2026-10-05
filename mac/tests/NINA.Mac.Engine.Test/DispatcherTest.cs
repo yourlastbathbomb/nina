@@ -19,6 +19,9 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,8 +40,14 @@ namespace NINA.Mac.Engine.Test {
         private sealed class LoopThread : IDisposable {
             private readonly BlockingCollection<(SendOrPostCallback callback, object state, ManualResetEventSlim done)> queue = new();
             private readonly Thread thread;
+            private readonly Action beforeContext;
+            private readonly Action afterContext;
 
-            public LoopThread() {
+            /// <param name="beforeContext">Runs on the loop thread before its SynchronizationContext is installed</param>
+            /// <param name="afterContext">Runs on the loop thread right after it is installed, before the loop starts</param>
+            public LoopThread(Action beforeContext = null, Action afterContext = null) {
+                this.beforeContext = beforeContext;
+                this.afterContext = afterContext;
                 thread = new Thread(Run) { IsBackground = true, Name = "loop" };
                 thread.Start();
             }
@@ -46,7 +55,9 @@ namespace NINA.Mac.Engine.Test {
             public Thread Thread => thread;
 
             private void Run() {
+                beforeContext?.Invoke();
                 SynchronizationContext.SetSynchronizationContext(new LoopContext(this));
+                afterContext?.Invoke();
                 foreach (var (callback, state, done) in queue.GetConsumingEnumerable()) {
                     try {
                         callback(state);
@@ -143,6 +154,120 @@ namespace NINA.Mac.Engine.Test {
             FluentActions.Invoking(() => dispatcher.BeginInvoke(DispatcherPriority.Inactive, new Action(() => { }))).Should().Throw<NotSupportedException>();
             FluentActions.Invoking(() => dispatcher.BeginInvoke(DispatcherPriority.Invalid, new Action(() => { }))).Should().Throw<InvalidEnumArgumentException>();
             FluentActions.Invoking(() => dispatcher.BeginInvoke((DispatcherPriority)11, new Action(() => { }))).Should().Throw<InvalidEnumArgumentException>();
+        }
+
+        [Test]
+        public void WithoutALoop_BeginInvoke_QueuesWhileAnotherThreadRunsWork_InsteadOfBlocking() {
+            var dispatcher = Task.Run(() => Dispatcher.CurrentDispatcher).Result;
+            using var started = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var busy = Task.Run(() => dispatcher.Invoke(() => { started.Set(); release.Wait(); }));
+            started.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+
+            var order = new ConcurrentQueue<string>();
+            DispatcherOperation queued;
+            try {
+                var clock = Stopwatch.StartNew();
+                var begin = Task.Run(() => dispatcher.BeginInvoke(new Action(() => order.Enqueue("queued"))));
+                begin.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue("BeginInvoke must not wait for the running item");
+                clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
+                queued = begin.Result;
+                queued.Status.Should().Be(DispatcherOperationStatus.Pending);
+                order.Enqueue("released");
+            } finally {
+                release.Set();
+            }
+            busy.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            queued.Task.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            queued.Status.Should().Be(DispatcherOperationStatus.Completed);
+            order.Should().Equal("released", "queued");
+        }
+
+        [Test]
+        public void WithoutALoop_AWorkItemWaitingForAThreadThatCallsBeginInvoke_DoesNotDeadlock() {
+            var dispatcher = Task.Run(() => Dispatcher.CurrentDispatcher).Result;
+            DispatcherOperation fromHelper = null;
+            var outer = Task.Run(() => dispatcher.Invoke(() => {
+                var helper = new Thread(() => fromHelper = dispatcher.BeginInvoke(new Action(() => { }))) { IsBackground = true };
+                helper.Start();
+                helper.Join();
+            }));
+            outer.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue("BeginInvoke from the helper queues instead of waiting for the work item");
+            fromHelper.Task.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        }
+
+        [Test]
+        public void WithoutALoop_InsideAWorkItem_InvokeRunsInline_AndBeginInvokeRunsAfterIt() {
+            var dispatcher = Task.Run(() => Dispatcher.CurrentDispatcher).Result;
+            var log = new ConcurrentQueue<int>();
+            DispatcherOperation inner = null;
+            var innerStatusInside = DispatcherOperationStatus.Aborted;
+            dispatcher.Invoke(() => {
+                inner = dispatcher.BeginInvoke(new Action(() => log.Enqueue(3)));
+                dispatcher.Invoke(() => log.Enqueue(1));
+                log.Enqueue(2);
+                innerStatusInside = inner.Status;
+            });
+            innerStatusInside.Should().Be(DispatcherOperationStatus.Pending, "as in WPF, BeginInvoke from a work item queues behind it");
+            inner.Task.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            log.Should().Equal(1, 2, 3);
+        }
+
+        [Test]
+        public void WithoutALoop_WorkItemsFromManyThreads_NeverOverlap() {
+            var dispatcher = Task.Run(() => Dispatcher.CurrentDispatcher).Result;
+            var running = 0;
+            var maxRunning = 0;
+            var ran = 0;
+            var maxLock = new object();
+            void Work() {
+                var now = Interlocked.Increment(ref running);
+                lock (maxLock) {
+                    maxRunning = Math.Max(maxRunning, now);
+                }
+                Thread.SpinWait(200);
+                Interlocked.Increment(ref ran);
+                Interlocked.Decrement(ref running);
+            }
+            var operations = new ConcurrentBag<DispatcherOperation>();
+            Task.WaitAll(Enumerable.Range(0, 8).Select(t => Task.Run(() => {
+                for (var i = 0; i < 50; i++) {
+                    if ((i + t) % 2 == 0) {
+                        dispatcher.Invoke(Work);
+                    } else {
+                        operations.Add(dispatcher.BeginInvoke(new Action(Work)));
+                    }
+                }
+            })).ToArray(), TimeSpan.FromSeconds(30)).Should().BeTrue();
+            Task.WaitAll(operations.Select(o => o.Task).ToArray(), TimeSpan.FromSeconds(30)).Should().BeTrue();
+            ran.Should().Be(400);
+            maxRunning.Should().Be(1);
+        }
+
+        [Test]
+        public void Application_AdoptsTheUiLoop_WhenItsThreadUsedTheDispatcherBeforeTheLoopExisted() {
+            // Without an Application, a dispatcher first used before the UI context was installed has no loop
+            using (var early = new LoopThread(beforeContext: CommandManager.InvalidateRequerySuggested)) {
+                var dispatcher = early.Call(() => Dispatcher.CurrentDispatcher);
+                Task.Run(() => dispatcher.Invoke(new Func<Thread>(() => Thread.CurrentThread))).Result.Should().NotBeSameAs(early.Thread);
+            }
+
+            // Creating the Application on that thread once the loop exists makes the dispatcher marshal through it
+            var current = typeof(Application).GetField("current", BindingFlags.NonPublic | BindingFlags.Static);
+            var hostApplication = current.GetValue(null);
+            try {
+                current.SetValue(null, null);
+                Application created = null;
+                using var loop = new LoopThread(beforeContext: CommandManager.InvalidateRequerySuggested, afterContext: () => created = new Application());
+                var dispatcher = loop.Call(() => Dispatcher.CurrentDispatcher);
+                created.Dispatcher.Should().BeSameAs(dispatcher);
+                Task.Run(() => created.Dispatcher.Invoke(new Func<Thread>(() => Thread.CurrentThread))).Result.Should().BeSameAs(loop.Thread);
+                var posted = created.Dispatcher.BeginInvoke(new Func<Thread>(() => Thread.CurrentThread));
+                posted.Task.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+                ((Task<object>)posted.Task).Result.Should().BeSameAs(loop.Thread);
+            } finally {
+                current.SetValue(null, hostApplication);
+            }
         }
 
         [Test]

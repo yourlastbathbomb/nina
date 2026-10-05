@@ -20,9 +20,9 @@ namespace NINA.Mac.Siril {
 
     /// <summary>
     /// NINA profile file patterns (Options › Imaging › File patterns) that make NINA write the <see cref="SessionLayout"/>
-    /// tree, plus <see cref="Expand"/>: a port of NINA's ImagePatterns.GetImageFileString with the separator fix and
-    /// the $$IMAGETYPEDIR$$ token proposed upstream (see README "Proposed upstream patch").
-    /// Image file path (profile) = <see cref="SessionLayout.Root"/>.
+    /// tree for targets whose names pass <see cref="SessionLayout.KeepsNinaFolderName"/>, plus <see cref="Expand"/>: a
+    /// port of NINA's ImagePatterns.GetImageFileString with the separator fix and the $$IMAGETYPEDIR$$ token proposed
+    /// upstream (see README "Proposed upstream patch"). Image file path (profile) = <see cref="SessionLayout.Root"/>.
     /// </summary>
     public static class NinaFilePatterns {
 
@@ -84,9 +84,9 @@ namespace NINA.Mac.Siril {
 
         /// <summary>
         /// Relative path (no extension) NINA would build from <paramref name="pattern"/>: a port of
-        /// ImagePatterns.GetImageFileString (NINA.Core/Model/ImagePattern.cs:181-200) with the proposed fix of
-        /// splitting on both '/' and '\' on every OS (upstream splits on CoreUtil.PATHSEPARATORS, CoreUtil.cs:31,
-        /// which is only '/' on macOS) and the proposed $$IMAGETYPEDIR$$ token. Values are formatted as
+        /// ImagePatterns.GetImageFileString (NINA.Core/Model/ImagePattern.cs:181-200) as this fork builds it: split on
+        /// both '/' and '\' (CoreUtil.PATHSEPARATORS, patched; upstream gets only '/' on macOS), Windows' invalid
+        /// file-name characters replaced on every OS, plus the proposed $$IMAGETYPEDIR$$ token. Values are formatted as
         /// BaseImageData.GetImagePatterns does (BaseImageData.cs:223-283), times in <paramref name="zone"/>.
         /// </summary>
         public static string Expand(string pattern, FrameInfo frame, TimeZoneInfo zone) {
@@ -116,7 +116,7 @@ namespace NINA.Mac.Siril {
             var segments = s.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
             var result = string.Empty;
             foreach (var segment in segments) {
-                result = Path.Combine(result, string.Join("_", segment.Split(Path.GetInvalidFileNameChars())).Trim());
+                result = Path.Combine(result, string.Join("_", segment.Split(NinaTokenValues.PortableInvalidFileNameChars)).Trim());
             }
             return result;
         }

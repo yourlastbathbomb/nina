@@ -39,15 +39,16 @@ mac/dotnet sln mac/NINA.Mac.slnx add mac/src/NINA.Mac.RigTools/NINA.Mac.RigTools
 ## Status
 
 - The library and CLI build with 0 warnings.
-- 162 NUnit tests pass, covering:
+- 187 NUnit tests pass, covering:
   - the `MAC_PORT_PLAN.md` section 6 table;
   - the research tables (alt x az grid, hour-angle table, FOV table, 58–126° session rotation);
   - Meeus examples 7.a, 12.a, 12.b, 13.b, 21.b and 25.a;
-  - absolute clock times for one night (see below);
+  - absolute clock times for one night, and the Sun's place on four dates (see below);
   - horizon parsing (`.hrz` and `.hpts`), including parity with upstream;
   - planner edge cases;
   - the CLI, including exit code 2 for bad arguments and bad horizon files.
 - Absolute times are pinned for the night of 2026-10-04 at Deep Water Bay (`AlmanacRegressionTest`, ±5 s): dusk and dawn at −6/−12/−18°, and the NGC 253, M42, M8 and M20 transits and 15° window edges. The expected values come from `tests/NINA.Mac.RigTools.Test/Oracle/almanac_oracle.py`, an independent standard-library Python script. It uses different and more complete models: IAU 2006 sidereal time with the equation of the equinoxes, a Meeus ch. 25 Sun with nutation and aberration, and IAU 2006 precession plus nutation and annual aberration for the targets. Its self-checks reproduce Meeus 12.a, 23.a and 25.a. RigTools agrees with it to 0.1–0.9 s for twilight and 0.2–2.4 s for target edges; the largest gap is the annual aberration RigTools leaves out.
+- The Sun's apparent RA/Dec is also pinned to the same oracle (±0.01°, the formula's quoted accuracy) on 2026-02-18, 05-21, 08-20 and 11-19, where the formula's `0.020 sin 2g` term peaks. That term is only 0.0005° on 2026-10-04, so the night above cannot see it. Measured: RA within 0.0052°, Dec within 0.0033°; without the term RA is off by 0.0165–0.0244°.
 - Hardware isn't involved. No result has been checked against the sky or an external almanac (HKO or USNO).
 
 ## The maths, with sources and accuracy
@@ -89,8 +90,9 @@ How it differs from upstream:
 1. **Inline comments work.** Upstream (`NINA.Core/Model/CustomHorizon.cs:97-113`) treats only lines that start with `#` as comments. A line such as `180 4  # over water` therefore has more than two tokens and is dropped, with only a log warning. The research template lost its 60.1° steep edge and its 4° over-water point this way. A test shows the effect: upstream returns 6° at azimuth 180 instead of 4°, and 58.5° at azimuth 61 instead of 24.7°.
 2. **Rejected lines are reported** with a line number and reason. `strict: true` throws instead.
 3. **Values that make no sense are rejected:** NaN or infinity, azimuth outside 0–360, altitude outside ±90. A repeated azimuth still replaces the earlier one (last wins), and a warning says so.
-4. **`.hpts` files** are read as MountWizzard4 JSON with upstream's structure checks, range checks and messages. The parity tests use the same Newtonsoft.Json 13.0.4 as upstream (test-only). Like upstream, a coordinate may be a number or a numeric string (`"10"`, `" 1e1 "`), and comments and trailing commas are allowed. Upstream loads some damaged files without complaint: a truncated file, text after the array, booleans (read as 1/0) and `"NaN"`. These are rejected here. Every failure is an `ArgumentException`, including invalid JSON and an empty file, so `rigplan` prints `rigplan: …` and exits with 2. Upstream instead throws `JsonReaderException`, `InvalidCastException`, `FormatException` or `NullReferenceException`.
-5. **`GetAltitude` never reads open sky by accident.** Upstream reduces a tiny negative azimuth (|az| ≤ ~2.8e-14, e.g. from `atan2` or a mount reporting −0.00000x) to `x % 360 + 360`, which rounds to exactly 360.0. `Interpolate1D` then falls off the last knot and returns 0, so the placeholder's 60° northern wall reads as 0° there. NaN and ±infinity also give 0. Here a reduced 360 wraps to 0, and a non-finite azimuth returns the profile's maximum, so a bad azimuth fails closed. Every other finite azimuth gives exactly upstream's value. The planner was never affected, because it normalises azimuths to [0, 360) first.
+4. **A file with no point at 0 or 360 gets a warning.** Grooming is kept as upstream for parity: both ends copy the altitude of the point nearest an end, rather than a straight line from the last point across north to the first. With points every 15° starting at 15° and a 60° wall up to 345°, that reads 26.7° at azimuth 355 instead of 43.3°, behind the wall. The warning (line 0, also for `.hpts`) names the copied altitude and what a straight line would give at 0. `rigplan` prints it for every command. Add a point at 0 or 360 to fix it.
+5. **`.hpts` files** are read as MountWizzard4 JSON with upstream's structure checks, range checks and messages. The parity tests use the same Newtonsoft.Json 13.0.4 as upstream (test-only). Like upstream, a coordinate may be a number or a numeric string (`"10"`, `" 1e1 "`), and comments and trailing commas are allowed. Upstream loads some damaged files without complaint: a truncated file, text after the array, booleans (read as 1/0) and `"NaN"`. These are rejected here. Every failure is an `ArgumentException`, including invalid JSON and an empty file, so `rigplan` prints `rigplan: …` and exits with 2. Upstream instead throws `JsonReaderException`, `InvalidCastException`, `FormatException` or `NullReferenceException`.
+6. **`GetAltitude` never reads open sky by accident.** Upstream reduces a tiny negative azimuth (|az| ≤ ~2.8e-14, e.g. from `atan2` or a mount reporting −0.00000x) to `x % 360 + 360`, which rounds to exactly 360.0. `Interpolate1D` then falls off the last knot and returns 0, so the placeholder's 60° northern wall reads as 0° there. NaN and ±infinity also give 0. Here a reduced 360 wraps to 0, and a non-finite azimuth returns the profile's maximum, so a bad azimuth fails closed. Every other finite azimuth gives exactly upstream's value. The planner was never affected, because it normalises azimuths to [0, 360) first.
 
 **Placeholder profile.** `SiteHorizons.DeepWaterBayPlaceholder` is the embedded `Horizon/DeepWaterBay.placeholder.hrz`, shaped like the corrected research Table 7:
 
@@ -177,7 +179,7 @@ Each window reports:
 - what opened and closed it;
 - start, end and peak altitude;
 - the worst max sub and when it happens;
-- one recommended fixed exposure: the longest of the 5/10/20/30 s dark-library steps that fits the worst case;
+- one recommended fixed exposure: the longest of the 5/10/20/30 s dark-library steps that fits the worst case. Custom steps (`--steps`) must be finite and positive; anything else is an error (exit 2), never a "use 0 s" recommendation;
 - the frame-rotation span.
 
 Flags:
@@ -186,8 +188,8 @@ Flags:
 |---|---|
 | `NeverRises` | Dec below −67.75° at this site |
 | `Circumpolar` | The target never sets |
-| `BlockedByHorizon` | It rises but never clears the profile and minimum altitude at any hour angle, e.g. Polaris or Dec +75 behind the northern wall |
-| `NotUpInDarkness` | It clears the limits at some hour angle, but not during tonight's darkness |
+| `BlockedByHorizon` | It rises but at no hour angle is it above the profile and the minimum altitude while also below the maximum, e.g. Polaris or Dec +75 behind the northern wall, or Dec +45 with `--max-alt 55` (clear of the 60° wall only above 55°) |
+| `NotUpInDarkness` | It is within all the limits at some hour angle, but not during tonight's darkness |
 | `PassesZenithKeyhole` | Transit altitude is above the maximum. Objects near Dec +22° pass overhead. The keyhole times are given, and the windows stop and restart at the 75° edges |
 | `RotationLimited` | No exposure step fits somewhere in a window, e.g. Dec +5 at transit allows ~4 s |
 | `NoDarkness` | The Sun never gets low enough that night |

@@ -22,7 +22,8 @@ namespace System.Windows.Input {
     /// WPF semantics kept: handlers are held through weak references (subscribers must keep their delegate alive),
     /// handlers and requests are per thread, and <see cref="InvalidateRequerySuggested"/> raises the event later
     /// through the calling thread's <see cref="Dispatcher"/> at Background priority, coalescing repeated requests.
-    /// Without a UI loop the dispatcher runs work inline, so the event is raised before the call returns.
+    /// Without a UI loop an idle dispatcher runs work inline, so the event is raised before the call returns; if the
+    /// dispatcher is busy on another thread, the requery is queued and raised on a thread-pool thread afterwards.
     /// WPF also requeries on every keyboard/mouse input; there is no input system here.
     /// </summary>
     public sealed class CommandManager {
@@ -41,12 +42,18 @@ namespace System.Windows.Input {
         public static event EventHandler RequerySuggested {
             add {
                 if (value != null) {
-                    Current.handlers.Add(new WeakReference<EventHandler>(value));
+                    var manager = Current;
+                    lock (manager.handlers) {
+                        manager.handlers.Add(new WeakReference<EventHandler>(value));
+                    }
                 }
             }
             remove {
                 if (value != null) {
-                    Current.handlers.RemoveAll(reference => !reference.TryGetTarget(out var handler) || handler == value);
+                    var manager = Current;
+                    lock (manager.handlers) {
+                        manager.handlers.RemoveAll(reference => !reference.TryGetTarget(out var handler) || handler == value);
+                    }
                 }
             }
         }
@@ -64,13 +71,15 @@ namespace System.Windows.Input {
 
         private void RaiseRequerySuggested() {
             var alive = new List<EventHandler>();
-            handlers.RemoveAll(reference => {
-                if (reference.TryGetTarget(out var handler)) {
-                    alive.Add(handler);
-                    return false;
-                }
-                return true;
-            });
+            lock (handlers) {
+                handlers.RemoveAll(reference => {
+                    if (reference.TryGetTarget(out var handler)) {
+                        alive.Add(handler);
+                        return false;
+                    }
+                    return true;
+                });
+            }
             foreach (var handler in alive) {
                 handler(null, EventArgs.Empty);
             }

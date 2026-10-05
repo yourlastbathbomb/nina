@@ -108,6 +108,30 @@ namespace NINA.Mac.Siril.Test {
             issues.Should().Contain(m => m.Contains("dark_20s_G252_O50_T0_B2.fit is 20x12"));
         }
 
+        [TestCase(null, true)]
+        [TestCase(0, true)]
+        [TestCase(-16, true)]
+        [TestCase(16, false)]
+        [TestCase(17, false)]
+        public void SyntheticOffset_NeedsAPositiveWholeMultiplier(int? multiplier, bool isError) {
+            for (var i = 0; i < 3; i++) {
+                Write("LIGHT", 20);
+                Write("FLAT", 1);
+            }
+            WriteMaster("dark_20s_G252_O50_T0_B2.fit");
+            var plan = Plan();
+            plan.FlatCalibration = FlatCalibration.SyntheticOffset;
+            plan.SyntheticOffsetMultiplier = multiplier;
+
+            var errors = SirilSessionValidator.Validate(plan).Where(i => i.Severity == SirilIssueSeverity.Error).Select(i => i.Message).ToList();
+
+            if (isError) {
+                errors.Should().ContainSingle(m => m.Contains("positive whole multiplier"));
+            } else {
+                errors.Should().BeEmpty("no biases/ are needed with a synthetic offset");
+            }
+        }
+
         [Test]
         public void CleanProcessDirectory_OnlyDeletesTheWorkingDirectorysProcessFolder() {
             var plan = Plan();

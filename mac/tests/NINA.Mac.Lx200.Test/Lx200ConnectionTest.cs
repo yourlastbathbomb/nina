@@ -140,6 +140,8 @@ namespace NINA.Mac.Lx200.Test {
             FluentActions.Invoking(() => h.Link.Send(":hP1#")).Should().Throw<Lx200BlockedCommandException>();
             FluentActions.Invoking(() => h.Link.Send(":Q:hP#")).Should().Throw<Lx200BlockedCommandException>();
             FluentActions.Invoking(() => h.Link.Send(":SB6#")).Should().Throw<Lx200BlockedCommandException>();
+            FluentActions.Invoking(() => h.Link.Send(": hP#")).Should().Throw<Lx200BlockedCommandException>();
+            FluentActions.Invoking(() => h.Link.Send(":gps#")).Should().Throw<Lx200BlockedCommandException>();
             FluentActions.Invoking(() => h.Link.Send(":Q#:hP#")).Should().Throw<Lx200MalformedCommandException>();
             h.Trace.Snapshot().Where(e => e.Kind == TraceKind.Tx).Should().BeEmpty("nothing was written");
         }
@@ -171,13 +173,37 @@ namespace NINA.Mac.Lx200.Test {
             h.Sim.AnyAxisMotion.Should().BeTrue();
             h.Sim.FocuserMoving.Should().BeTrue();
 
-            h.Link.StopAll("test");
+            h.Link.StopAll("test").Should().BeTrue("the mount took every halt");
 
             h.Link.MotionCommanded.Should().BeFalse();
             h.Sim.AnyAxisMotion.Should().BeFalse();
             h.Sim.FocuserMoving.Should().BeFalse();
             var tail = h.Sim.ReceivedCommands.SkipWhile(c => c != ":F+#").Skip(1).ToList();
             tail.Should().ContainInOrder(":Q#", ":Qn#", ":Qs#", ":Qe#", ":Qw#", ":FQ#", ":FQ#");
+        }
+
+        [Test]
+        public void StopAll_SaysSo_WhenTheMountRefusesTheHalts() {
+            using var h = new SimHarness(new SimOptions { HaltsNaked = true });
+            h.Link.Send(":F+#");
+
+            h.Link.StopAll("test").Should().BeFalse("every halt was answered NAK");
+
+            h.Link.MotionCommanded.Should().BeTrue("nothing confirms the motion stopped");
+            h.Sim.FocuserMoving.Should().BeTrue();
+        }
+
+        [Test]
+        public void MotionStartsAndHalts_AreNotDelayedByTheTrailingWindow() {
+            // the trailing window is for spotting a wrong reply shape; after :F+# or :FQ# it would delay a timed halt
+            using var h = new SimHarness(null, new Lx200ConnectionOptions { TrailingWindow = TimeSpan.FromMilliseconds(500) });
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            h.Link.Send(":F+#").Status.Should().Be(ReplyStatus.NoReplyExpected);
+            h.Link.Send(":FQ#").Status.Should().Be(ReplyStatus.NoReplyExpected);
+            sw.ElapsedMilliseconds.Should().BeLessThan(500, "two NAK windows, not two trailing windows");
+            var config = System.Diagnostics.Stopwatch.StartNew();
+            h.Link.Send(":F2#");
+            config.ElapsedMilliseconds.Should().BeGreaterThanOrEqualTo(500, "other commands still get the trailing window");
         }
 
         [Test]

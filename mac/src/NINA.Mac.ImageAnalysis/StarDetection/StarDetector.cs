@@ -742,14 +742,23 @@ namespace NINA.Mac.ImageAnalysis {
             //Now that we have a properly filtered star list, let's compute stats and further filter out from the mean
             if (starList.Count > 0) {
                 double avg = sumRadius / starList.Count;
-                // note: can be NaN when rounding makes the bracket slightly negative (all radii equal); upstream behaviour kept
+                // Upstream behaviour kept on purpose. When all radii are equal, avg usually comes out a few ulp away from
+                // the common radius, so this one-pass stdev is NaN (or exactly 0): the band then excludes every star and
+                // the frame reports 0 stars. Reproduced end to end (7 identical stars -> 0 stars) in
+                // StarDetectionTests.EqualRadii_UpstreamOnePassStdDev_DropsEveryStar; README proposed patch 1 is the fix.
                 double stdev = Math.Sqrt((sumSquares - (starList.Count * avg * avg)) / starList.Count);
+                var beforeFilter = starList;
                 if (p.Sensitivity != StarSensitivity.Highest) {
+                    result.RadiusFilterBand = (avg - (1.5 * stdev), avg + (1.5 * stdev));
                     starList = starList.Where(s => s.Radius <= avg + (1.5 * stdev) && s.Radius >= avg - (1.5 * stdev)).ToList<Star>();
                 } else {
                     //More sensitivity means getting fainter and smaller stars, and maybe some noise, skewing the distribution towards low radius. Let's be more permissive towards the large star end.
+                    result.RadiusFilterBand = (avg - (1.5 * stdev), avg + (2 * stdev));
                     starList = starList.Where(s => s.Radius <= avg + (2 * stdev) && s.Radius >= avg - (1.5 * stdev)).ToList<Star>();
                 }
+                // fork diagnostic only: what the band removed
+                var kept = new HashSet<Star>(starList);
+                result.RadiusFilterRejected = beforeFilter.Where(s => !kept.Contains(s)).Select(s => s.ToDetectedStar()).ToList();
             }
 
             // Ensure we provide the list of detected stars, even if NumberOfAF stars is used

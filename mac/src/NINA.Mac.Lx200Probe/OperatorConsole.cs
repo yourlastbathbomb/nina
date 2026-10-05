@@ -14,6 +14,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace NINA.Mac.Lx200Probe {
 
@@ -28,13 +29,35 @@ namespace NINA.Mac.Lx200Probe {
         string ReadLine();
     }
 
+    /// <summary>
+    /// The terminal. Output to a terminal that has gone (window closed: the run then unwinds after SIGHUP to put the
+    /// mount's date back and write results.md) is dropped instead of failing the run.
+    /// </summary>
     public sealed class SystemConsole : IOperatorConsole {
 
-        public void WriteLine(string text) => Console.WriteLine(text);
+        public void WriteLine(string text) {
+            try {
+                Console.WriteLine(text);
+            } catch (IOException) {
+                // no terminal left to write to
+            }
+        }
 
-        public void Write(string text) => Console.Write(text);
+        public void Write(string text) {
+            try {
+                Console.Write(text);
+            } catch (IOException) {
+                // no terminal left to write to
+            }
+        }
 
-        public string ReadLine() => Console.ReadLine();
+        public string ReadLine() {
+            try {
+                return Console.ReadLine();
+            } catch (IOException) {
+                return null;   // end of input
+            }
+        }
     }
 
     /// <summary>Scripted answers for tests; records everything written.</summary>
@@ -74,6 +97,9 @@ namespace NINA.Mac.Lx200Probe {
     /// <summary>Questions to the operator. With <see cref="AutoYes"/> (simulator only) confirmations answer themselves.</summary>
     public sealed class Prompter {
 
+        /// <summary>Said (and written to results.md) when the mount did not take every stop command.</summary>
+        public const string StopNotAccepted = "WARNING: the mount did not accept every stop command (NAK, or the link failed; see trace.log). The mount or the focuser may still be moving: switch the mount off.";
+
         public Prompter(IOperatorConsole console, bool autoYes = false) {
             Console = console;
             AutoYes = autoYes;
@@ -84,6 +110,13 @@ namespace NINA.Mac.Lx200Probe {
         public bool AutoYes { get; }
 
         public void Say(string text) => Console.WriteLine(text);
+
+        /// <summary>A warning that must not scroll past unnoticed.</summary>
+        public void Alarm(string text) {
+            Console.WriteLine("");
+            Console.WriteLine("*** " + text + " ***");
+            Console.WriteLine("");
+        }
 
         /// <summary>[y/N]; anything but y/yes (or end of input) is no.</summary>
         public bool Confirm(string question) {

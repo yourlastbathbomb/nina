@@ -50,7 +50,7 @@ namespace NINA.Mac.RigTools.Planning {
         /// </summary>
         public double? MinSubSeconds { get; init; }
 
-        /// <summary>Dark-library exposure steps (decision 7: 10/20/30 s, +5 s). The recommended sub is the longest step within the limit.</summary>
+        /// <summary>Dark-library exposure steps (decision 7: 10/20/30 s, +5 s), each finite and positive. The recommended sub is the longest step within the limit.</summary>
         public IReadOnlyList<double> ExposureStepsSeconds { get; init; } = new[] { 5.0, 10.0, 20.0, 30.0 };
 
         /// <summary>Fine sampling step for window edges and statistics; edges are then refined to 0.5 s.</summary>
@@ -71,6 +71,12 @@ namespace NINA.Mac.RigTools.Planning {
             if (SampleSeconds < 5 || SampleSeconds > 600) { throw new ArgumentException("SampleSeconds must be within [5, 600]"); }
             if (ReportIntervalMinutes < 1) { throw new ArgumentException("ReportIntervalMinutes must be positive"); }
             if (ExposureStepsSeconds == null || ExposureStepsSeconds.Count == 0) { throw new ArgumentException("ExposureStepsSeconds is empty"); }
+            foreach (var step in ExposureStepsSeconds) {
+                // A zero, negative or NaN step would be "recommended" (use 0 s) and hide RotationLimited.
+                if (!(double.IsFinite(step) && step > 0)) {
+                    throw new ArgumentException(FormattableString.Invariant($"Exposure steps must be finite and positive seconds, got {step}"));
+                }
+            }
         }
     }
 
@@ -96,10 +102,13 @@ namespace NINA.Mac.RigTools.Planning {
         /// <summary>Never sets below the geometric horizon (Dec &gt; 90 - latitude).</summary>
         Circumpolar = 2,
 
-        /// <summary>Rises, but never clears the horizon profile and the minimum altitude at any hour angle.</summary>
+        /// <summary>
+        /// Rises, but at no hour angle is it above the horizon profile and the minimum altitude while also below the
+        /// maximum altitude (e.g. behind a wall except where it passes the zenith keyhole).
+        /// </summary>
         BlockedByHorizon = 4,
 
-        /// <summary>Clears the limits at some hour angle, but not during tonight's darkness.</summary>
+        /// <summary>Within the horizon, minimum and maximum altitude limits at some hour angle, but not during tonight's darkness.</summary>
         NotUpInDarkness = 8,
 
         /// <summary>Transit altitude above the max altitude: the object passes through the zenith keyhole.</summary>

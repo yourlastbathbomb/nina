@@ -10,7 +10,7 @@
 #    file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #
 #endregion "copyright"
-"""Independent oracle for the absolute times pinned in AlmanacRegressionTest.cs.
+"""Independent oracle for the absolute times and Sun positions pinned in AlmanacRegressionTest.cs.
 
 Run: python3 almanac_oracle.py   (standard library only)
 
@@ -224,8 +224,21 @@ def self_checks():
     print("self-check 25.a Sun apparent: ra %.5f dec %.5f deg (Meeus 198.38083 / -7.78507; VSOP87 198.37818 / -7.78387)" % (math.degrees(ra) % 360, math.degrees(dec)))
 
 
+def sun_second_harmonic():
+    # Dates in 2026 where the low-precision formula's 0.020 sin 2g term peaks (|sin 2g| ~ 1; g = 45/135/225/315
+    # deg), so that term (0.020 deg of longitude) is actually tested. On 2026-10-04 it is only 0.0005 deg.
+    print("Apparent Sun at 0h UTC where |sin 2g| ~ 1 (AlmanacRegressionTest.Sun_*):")
+    for y, m, d in ((2026, 2, 18), (2026, 5, 21), (2026, 8, 20), (2026, 11, 19)):
+        t = datetime(y, m, d, tzinfo=timezone.utc)
+        n = jd_utc(t) - 2451545.0
+        g = (357.528 + 0.9856003 * n) % 360
+        ra, dec = sun_apparent_radec(t)
+        print("  %04d-%02d-%02d: ra %.5f dec %.5f deg (g %.1f deg, sin 2g %+.4f)" % (y, m, d, math.degrees(ra) % 360, math.degrees(dec), g, math.sin(2 * g * D2R)))
+
+
 def main():
     self_checks()
+    sun_second_harmonic()
     noon = datetime(2026, 10, 4, 12, 0, tzinfo=HKT)
     end = noon + timedelta(days=1)
     print("Night of 2026-10-04, Deep Water Bay 22.25N 114.18E, HKT (UTC+8):")

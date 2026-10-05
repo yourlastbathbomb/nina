@@ -36,6 +36,13 @@ namespace NINA.Mac.ImageAnalysis {
         /// with slopes of opposite sign (a code-reading concern; vertical spikes worked in the tests). Here each spike is
         /// the mean of its two edges in normal form (unit normal, distance).</item>
         /// </list>
+        /// It also checks itself: if the two edges paired into any spike are more than
+        /// <see cref="MaxEdgePairAngleDegrees"/> apart, an edge was lost and a spurious line took its place, so the
+        /// result has <c>Success = false</c> instead of a wrong offset. Validated on synthetic patterns only: with the
+        /// generator's 17 degree outer half-angle it is within 1 px for spike sigma up to about 3 px in 200 px crops and
+        /// about 4 px in 300 px crops (bin 2 or mono-bin on this rig gives about 1.7-2.7 px). Wider spikes and smaller
+        /// crops mostly return Success = false. Readings within about 1.5 px of focus can still have the wrong sign
+        /// (README, Bahtinov).
         /// The geometry afterwards (outer-spike intersection, perpendicular to the central spike) is upstream's.
         /// </summary>
         public static BahtinovResult AnalyzeRobust(Gray8Image image, BahtinovResult previous = null) {
@@ -87,7 +94,17 @@ namespace NINA.Mac.ImageAnalysis {
             }
             var sequence = Enumerable.Range(0, ordered.Count).Select(i => ordered[(cut + i) % ordered.Count]).ToList();
 
-            // 3. average each pair of edges in normal form
+            // 3. each spike must be a pair of parallel edges: directions within one Hough step. Otherwise one edge of a
+            // spike was lost and a spurious line took its place (wide spikes, small crops); report no measurement
+            // rather than a confident wrong offset. The two edges are then also >= 2 px apart, because step 1 merged
+            // peaks within 1 degree and 1 px.
+            for (int i = 0; i < 6; i += 2) {
+                if (AngleBetweenDegrees(sequence[i], sequence[i + 1]) > MaxEdgePairAngleDegrees + 1e-6) {
+                    return result;
+                }
+            }
+
+            // 4. average each pair of edges in normal form
             var spikes = new List<NormalLine>();
             for (int i = 0; i < 6; i += 2) {
                 spikes.Add(NormalLine.Average(sequence[i], sequence[i + 1]));
@@ -127,6 +144,14 @@ namespace NINA.Mac.ImageAnalysis {
             result.SignedOffset = ((px - fx) * normal.X) + ((py - fy) * normal.Y);
             result.Success = true;
             return result;
+        }
+
+        /// <summary>Largest angle (degrees) between the two edges paired into one spike; one Hough step (1 degree).</summary>
+        public const double MaxEdgePairAngleDegrees = 1.0;
+
+        private static double AngleBetweenDegrees(NormalLine a, NormalLine b) {
+            double d = Math.Abs(a.DirectionDegrees - b.DirectionDegrees) % 180;
+            return Math.Min(d, 180 - d);
         }
 
         private static bool IsSamePeak(HoughLine a, HoughLine b) {

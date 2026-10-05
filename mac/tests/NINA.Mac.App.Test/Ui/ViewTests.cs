@@ -17,8 +17,11 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Controls.Templates;
 using Avalonia.Logging;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluentAssertions;
@@ -117,13 +120,16 @@ namespace NINA.Mac.App.Test.Ui {
                     var night = ScreenRenderer.RenderAllPages(window, vm, ScreenshotDirectory, "-night");
 
                     dark.Should().HaveCount(8);
-                    foreach (var (page, stats) in dark) {
-                        stats.LooksRendered.Should().BeTrue($"{page} (dark) should not be blank: {stats}");
-                        stats.Width.Should().Be(1280);
+                    foreach (var frame in dark.Concat(night)) {
+                        // The page's own view is shown and its area (not just the sidebar and status bar) has content
+                        frame.View.Should().Be($"{frame.Page}View", $"{frame.Page} must show its view");
+                        frame.Content.LooksRendered.Should().BeTrue($"{frame.Page} page area should not be blank: {frame.Content}");
+                        frame.LooksRendered.Should().BeTrue($"{frame.Page} should not be blank: {frame}");
+                        frame.Stats.Width.Should().Be(1280);
                     }
-                    foreach (var (page, stats) in night) {
-                        stats.LooksRendered.Should().BeTrue($"{page} (night) should not be blank: {stats}");
-                        stats.NonRedSamples.Should().Be(0, $"{page} in night vision must be red only: {stats}");
+                    foreach (var frame in night) {
+                        frame.Stats.NonRedSamples.Should().Be(0, $"{frame.Page} in night vision must be red only: {frame.Stats}");
+                        frame.Stats.MaxGreenBlueToRed.Should().BeLessThan(0.45, $"{frame.Page} night palette ratio: {frame.Stats}");
                     }
                     // Night vision really is darker and redder than the dark theme
                     night.Average(n => n.Stats.MeanLuma).Should().BeLessThan(dark.Average(d => d.Stats.MeanLuma));
@@ -132,6 +138,81 @@ namespace NINA.Mac.App.Test.Ui {
                     Theme.Apply(false);
                     window.Close();
                 }
+            });
+        }
+
+        [Test]
+        public void RenderAllPages_FlagsAPageWhoseViewIsMissing() {
+            OnUi(() => {
+                var (_, vm, window) = Open();
+                try {
+                    // Only the shell renders: the page host shows an empty panel instead of the page's view
+                    var host = Find<ContentControl>(window, "PageHost");
+                    host.ContentTemplate = new FuncDataTemplate<object>((_, _) => new Panel());
+                    var frames = ScreenRenderer.RenderAllPages(window, vm);
+                    frames.Should().OnlyContain(f => f.Stats.LooksRendered, "the sidebar and status bar still render");
+                    frames.Should().OnlyContain(f => f.View == null && !f.Content.LooksRendered && !f.LooksRendered);
+                } finally {
+                    window.Close();
+                }
+            });
+        }
+
+        private static WriteableBitmap Solid(byte r, byte g, byte b) {
+            var bitmap = new WriteableBitmap(new PixelSize(64, 48), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+            using var fb = bitmap.Lock();
+            var row = new byte[fb.RowBytes];
+            for (var x = 0; x < 64; x++) {
+                row[(x * 4) + 0] = b;
+                row[(x * 4) + 1] = g;
+                row[(x * 4) + 2] = r;
+                row[(x * 4) + 3] = 255;
+            }
+            for (var y = 0; y < 48; y++) {
+                System.Runtime.InteropServices.Marshal.Copy(row, 0, fb.Address + (y * fb.RowBytes), row.Length);
+            }
+            return bitmap;
+        }
+
+        [TestCase(255, 255, 255, true)]   // white
+        [TestCase(128, 128, 128, true)]   // grey
+        [TestCase(40, 40, 40, true)]      // dark grey
+        [TestCase(30, 120, 40, true)]     // green
+        [TestCase(30, 40, 160, true)]     // blue
+        [TestCase(200, 140, 40, true)]    // amber (the dark theme's warning colour family)
+        [TestCase(192, 50, 42, false)]    // night text #C0322A
+        [TestCase(255, 90, 78, false)]    // night error #FF5A4E
+        [TestCase(224, 69, 58, false)]    // night warning #E0453A
+        [TestCase(46, 5, 5, false)]       // night border #2E0505
+        [TestCase(0, 0, 0, false)]        // black
+        [TestCase(3, 2, 2, false)]        // anti-aliasing noise near black
+        public void NightVisionRedCheck_RejectsWhiteGreyGreenAndBlue(int r, int g, int b, bool nonRed) {
+            ScreenRenderer.IsNonRed((byte)r, (byte)g, (byte)b).Should().Be(nonRed);
+            OnUi(() => {
+                using var bitmap = Solid((byte)r, (byte)g, (byte)b);
+                var stats = ScreenRenderer.Analyze(bitmap);
+                stats.Samples.Should().BeGreaterThan(0);
+                (stats.NonRedSamples == stats.Samples).Should().Be(nonRed, stats.ToString());
+                stats.NonRedSamples.Should().Be(nonRed ? stats.Samples : 0);
+            });
+        }
+
+        [Test]
+        public void Analyze_Region_SamplesOnlyThatRegion() {
+            OnUi(() => {
+                using var bitmap = Solid(0, 0, 0);
+                using (var fb = bitmap.Lock()) {
+                    // A white block in the top-left quarter only
+                    var white = Enumerable.Repeat((byte)255, 32 * 4).ToArray();
+                    for (var y = 0; y < 24; y++) {
+                        System.Runtime.InteropServices.Marshal.Copy(white, 0, fb.Address + (y * fb.RowBytes), white.Length);
+                    }
+                }
+                ScreenRenderer.Analyze(bitmap, new PixelRect(32, 24, 32, 24)).NonRedSamples.Should().Be(0);
+                var corner = ScreenRenderer.Analyze(bitmap, new PixelRect(0, 0, 32, 24));
+                corner.NonRedSamples.Should().Be(corner.Samples);
+                corner.Width.Should().Be(32);
+                ScreenRenderer.Analyze(bitmap, new PixelRect(40, 40, 100, 100)).Height.Should().Be(8, "the region is clipped to the bitmap");
             });
         }
 
@@ -259,7 +340,7 @@ namespace NINA.Mac.App.Test.Ui {
                     Click(window, Find<Button>(window, "AboutButton"));
                     var about = window.LastAboutWindow;
                     about.Should().NotBeNull();
-                    about.Title.Should().Be("About Nightglass (working name)");
+                    about.Title.Should().Be("About Nightglass");
                     Find<TextBlock>(about, "BasedOn").Text.Should().StartWith("Based on N.I.N.A.");
                     Find<TextBlock>(about, "License").Text.Should().Contain("Mozilla Public License");
                     ScreenRenderer.Capture(about, Path.Combine(ScreenshotDirectory, "about.png")).LooksRendered.Should().BeTrue();

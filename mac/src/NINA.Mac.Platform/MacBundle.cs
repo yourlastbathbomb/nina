@@ -29,6 +29,24 @@ namespace NINA.Mac.Platform {
         /// <summary>-[NSBundle mainBundle].bundleIdentifier: CFBundleIdentifier, or null outside a bundle.</summary>
         public static string MainBundleIdentifier() => Query("bundleIdentifier");
 
+        /// <summary>
+        /// -[NSBundle mainBundle] objectForInfoDictionaryKey: for a string entry of Info.plist (CFBundleName,
+        /// CFBundleExecutable, ...). Null when the key is missing or its value is not a string.
+        /// </summary>
+        public static string MainBundleInfoString(string key) {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+            PlatformGuard.EnsureMacOS();
+            return ObjC.WithAutoreleasePool(() => {
+                var bundle = ObjC.MsgSend(ObjC.Class("NSBundle"), ObjC.sel_registerName("mainBundle"));
+                if (bundle == IntPtr.Zero) {
+                    return null;
+                }
+                using var cfKey = CoreFoundation.CreateString(key); // toll-free bridged to NSString
+                var value = ObjC.MsgSend(bundle, ObjC.sel_registerName("objectForInfoDictionaryKey:"), cfKey.Handle);
+                return CoreFoundation.ToManagedString(value); // null unless the value is a string
+            });
+        }
+
         private static string Query(string selector) {
             PlatformGuard.EnsureMacOS();
             return ObjC.WithAutoreleasePool(() => {

@@ -40,7 +40,8 @@ namespace NINA.Mac.Lx200 {
 
         /// <summary>
         /// When positive, keep listening this long after each complete reply and report anything that arrives as
-        /// <see cref="Lx200Reply.Trailing"/>: proof at the bench that a reply shape is wrong.
+        /// <see cref="Lx200Reply.Trailing"/>: proof at the bench that a reply shape is wrong. Not applied after
+        /// motion starts and halts that have no reply, so a host-timed move stops on time.
         /// </summary>
         public TimeSpan TrailingWindow { get; set; } = TimeSpan.Zero;
 
@@ -186,7 +187,11 @@ namespace NINA.Mac.Lx200 {
         /// :FQ# is sometimes missed). Never throws. If another thread holds the link for more than 3 s the stop
         /// bytes are written directly.
         /// </summary>
-        public void StopAll(string reason) {
+        /// <returns>
+        /// False when a stop could not be written or the mount refused one (NAK after every retry): the mount or the
+        /// focuser may still be moving, and <see cref="MotionCommanded"/> stays set.
+        /// </returns>
+        public bool StopAll(string reason) {
             var taken = false;
             try {
                 Monitor.TryEnter(sync, TimeSpan.FromSeconds(3), ref taken);
@@ -211,9 +216,13 @@ namespace NINA.Mac.Lx200 {
                 Options.TrailingWindow = trailing;
                 if (allSent) {
                     Volatile.Write(ref motionCommanded, 0);
+                } else {
+                    Trace.Note("STOP ALL: not every stop was accepted; motion may continue");
                 }
+                return allSent;
             } catch (Exception ex) {
                 Trace.Log(TraceKind.Error, ReadOnlySpan<byte>.Empty, $"STOP ALL failed: {ex.Message}");
+                return false;
             } finally {
                 if (taken) {
                     Monitor.Exit(sync);
@@ -261,7 +270,11 @@ namespace NINA.Mac.Lx200 {
                         continue;
                     }
                 }
-                if (status is ReplyStatus.Ok or ReplyStatus.NoReplyExpected && Options.TrailingWindow > TimeSpan.Zero) {
+                // Motion starts and halts are timed by the host (:F+# ... :FQ#, :Mn# ... :Qn#): listening after them
+                // would push the halt late. A byte sent back to them still shows up in the NAK window (framing
+                // error) or as stale input before the next command.
+                var timed = status == ReplyStatus.NoReplyExpected && command.Effect is CommandEffect.MovesHardware or CommandEffect.Halt;
+                if (status is ReplyStatus.Ok or ReplyStatus.NoReplyExpected && Options.TrailingWindow > TimeSpan.Zero && !timed) {
                     trailing.AddRange(reader.Quiet(Options.TrailingWindow));
                 }
                 reply.Status = status;

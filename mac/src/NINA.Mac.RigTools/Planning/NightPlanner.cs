@@ -137,7 +137,9 @@ namespace NINA.Mac.RigTools.Planning {
             }
             if (!flags.HasFlag(TargetFlags.NeverRises) && !ClearsLimitsAnyTime(evaluator, middle)) {
                 flags |= TargetFlags.BlockedByHorizon;
-                notes.Add(Invariant($"Never clears the horizon profile and the {options.MinAltitudeDeg:0}° minimum at any hour angle (highest point: alt {transitAlt:0.0}° at az {transitAz:0})."));
+                // Above the keyhole, the stretch below the max altitude is all behind the profile or under the minimum.
+                var belowMax = transitAlt > options.MaxAltitudeDeg ? Invariant($" while below the {options.MaxAltitudeDeg:0.#}° maximum") : "";
+                notes.Add(Invariant($"Never clears the horizon profile and the {options.MinAltitudeDeg:0}° minimum at any hour angle{belowMax} (highest point: alt {transitAlt:0.0}° at az {transitAz:0})."));
             }
 
             (DateTimeOffset, DateTimeOffset)? keyhole = null;
@@ -172,7 +174,7 @@ namespace NINA.Mac.RigTools.Planning {
             var smallestStep = options.ExposureStepsSeconds.Min();
             foreach (var w in windows.Where(w => w.RecommendedSubSeconds == null)) {
                 flags |= TargetFlags.RotationLimited;
-                notes.Add(Invariant($"{w.Side} window {T(w.Start)}-{T(w.End)}: field rotation allows only {w.ShortestMaxSubSeconds:0.0} s at {T(w.ShortestMaxSubAt)}, below the shortest step ({smallestStep:0} s). Shorten the window or accept more corner blur."));
+                notes.Add(Invariant($"{w.Side} window {T(w.Start)}-{T(w.End)}: field rotation allows only {w.ShortestMaxSubSeconds:0.0} s at {T(w.ShortestMaxSubAt)}, below the shortest step ({smallestStep:0.#} s). Shorten the window or accept more corner blur."));
             }
 
             return new TargetPlan {
@@ -191,13 +193,18 @@ namespace NINA.Mac.RigTools.Planning {
             };
         }
 
-        /// <summary>Whether the target clears the horizon profile and minimum altitude at any hour angle (one sidereal day, 2-minute steps).</summary>
+        /// <summary>
+        /// Whether the target is within all the geometric limits (horizon profile, minimum and maximum altitude) at
+        /// the same instant at some hour angle (one sidereal day, 2-minute steps). Darkness and the optional
+        /// field-rotation cut are not part of it.
+        /// </summary>
         private static bool ClearsLimitsAnyTime(Evaluator evaluator, DateTimeOffset start) {
+            const PlanConstraint geometric = PlanConstraint.Horizon | PlanConstraint.MinAltitude | PlanConstraint.MaxAltitude;
             var step = TimeSpan.FromMinutes(2);
             var end = start + TimeSpan.FromHours(24 / AstroTime.SiderealPerSolar);
             for (var t = start; t <= end; t += step) {
                 var s = evaluator.At(t);
-                if ((s.Violations & (PlanConstraint.Horizon | PlanConstraint.MinAltitude)) == 0) {
+                if ((s.Violations & geometric) == 0) {
                     return true;
                 }
             }

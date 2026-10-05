@@ -28,8 +28,12 @@ namespace NINA.Mac.Astrometry.Test {
 
         public static string DataRoot { get; private set; } = string.Empty;
 
+        /// <summary>CoreUtil.APPLICATIONTEMPPATH as NINA computes it on this machine, before the test host moves it.</summary>
+        public static string DefaultApplicationTempPath { get; private set; } = string.Empty;
+
         [ModuleInitializer]
         internal static void Initialize() {
+            DefaultApplicationTempPath = CoreUtil.APPLICATIONTEMPPATH;
             DataRoot = Path.Combine(Path.GetTempPath(), "nina-mac-astrometry-test-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(DataRoot);
             CoreUtil.APPLICATIONTEMPPATH = DataRoot;

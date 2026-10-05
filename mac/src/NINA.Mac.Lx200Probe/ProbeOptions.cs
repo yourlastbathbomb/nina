@@ -20,6 +20,13 @@ using System.Linq;
 
 namespace NINA.Mac.Lx200Probe {
 
+    /// <summary>A command-line mistake: printed without a stack trace, exit code 2, before anything is opened.</summary>
+    internal sealed class UsageException : Exception {
+
+        public UsageException(string message) : base(message) {
+        }
+    }
+
     /// <summary>"--key value" / "--flag" options; a key may repeat (--sim-quirk).</summary>
     internal sealed class ProbeOptions {
         private readonly Dictionary<string, List<string>> values = new(StringComparer.OrdinalIgnoreCase);
@@ -28,8 +35,8 @@ namespace NINA.Mac.Lx200Probe {
             var o = new ProbeOptions();
             var list = args.ToList();
             for (var i = 0; i < list.Count; i++) {
-                if (!list[i].StartsWith("--", StringComparison.Ordinal)) {
-                    throw new ArgumentException($"Unexpected argument '{list[i]}'");
+                if (!list[i].StartsWith("--", StringComparison.Ordinal) || list[i].Length == 2) {
+                    throw new UsageException($"Unexpected argument '{list[i]}'");
                 }
                 var key = list[i][2..];
                 var hasValue = i + 1 < list.Count && !list[i + 1].StartsWith("--", StringComparison.Ordinal);
@@ -41,6 +48,17 @@ namespace NINA.Mac.Lx200Probe {
             return o;
         }
 
+        /// <summary>
+        /// Refuses options the command does not know, so a typo (say "--skp 4") stops the run instead of being
+        /// ignored at the bench.
+        /// </summary>
+        public void RequireOnly(string command, IReadOnlyCollection<string> known) {
+            var unknown = values.Keys.Where(k => !known.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (unknown.Count > 0) {
+                throw new UsageException($"'{command}' does not take {string.Join(", ", unknown.Select(k => "--" + k))}. Options: {(known.Count == 0 ? "none" : string.Join(" ", known.Select(k => "--" + k)))}");
+            }
+        }
+
         public bool Has(string key) => values.ContainsKey(key);
 
         public bool Flag(string key) => values.TryGetValue(key, out var v) && v[^1] == "true";
@@ -49,9 +67,35 @@ namespace NINA.Mac.Lx200Probe {
 
         public IReadOnlyList<string> All(string key) => values.TryGetValue(key, out var v) ? v : Array.Empty<string>();
 
-        public int Int(string key, int fallback) => values.TryGetValue(key, out var v) ? int.Parse(v[^1], CultureInfo.InvariantCulture) : fallback;
+        public int Int(string key, int fallback) {
+            if (!values.TryGetValue(key, out var v)) {
+                return fallback;
+            }
+            return int.TryParse(v[^1], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n)
+                ? n
+                : throw new UsageException($"--{key} needs a whole number, not '{v[^1]}'");
+        }
 
-        public double Double(string key, double fallback) => values.TryGetValue(key, out var v) ? double.Parse(v[^1], CultureInfo.InvariantCulture) : fallback;
+        public double Double(string key, double fallback) {
+            if (!values.TryGetValue(key, out var v)) {
+                return fallback;
+            }
+            return double.TryParse(v[^1], NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var d)
+                ? d
+                : throw new UsageException($"--{key} needs a number such as 1.5, not '{v[^1]}'");
+        }
+
+        /// <summary>Comma-separated whole numbers ("--skip 1,2,5"), each within [min, max].</summary>
+        public IReadOnlyList<int> IntList(string key, int min, int max) {
+            var result = new List<int>();
+            foreach (var part in String(key, "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+                if (!int.TryParse(part, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < min || n > max) {
+                    throw new UsageException($"--{key} takes numbers {min}..{max} separated by commas, not '{part}'");
+                }
+                result.Add(n);
+            }
+            return result;
+        }
 
         public IEnumerable<string> Keys => values.Keys;
 

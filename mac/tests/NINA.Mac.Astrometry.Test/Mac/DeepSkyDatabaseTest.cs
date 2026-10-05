@@ -56,6 +56,20 @@ namespace NINA.Mac.Astrometry.Test {
         }
 
         /// <summary>
+        /// The mac data folder is chosen, not inherited by accident: CoreUtil.APPLICATIONTEMPPATH is
+        /// LocalApplicationData/NINA, and .NET 10 on macOS resolves LocalApplicationData to ~/Library/Application Support,
+        /// where macOS apps keep their data. Logs, profiles and the default NINA.sqlite live there. If a runtime ever maps
+        /// LocalApplicationData elsewhere, this test says so. The test host moves the folder to a temp path before any test runs.
+        /// </summary>
+        [Test]
+        public void DefaultDataFolder_IsNinaInApplicationSupport() {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            TestHost.DefaultApplicationTempPath.Should().Be(Path.Combine(home, "Library", "Application Support", "NINA"));
+            CoreUtil.APPLICATIONTEMPPATH.Should().Be(TestHost.DataRoot).And.StartWith(Path.GetTempPath());
+        }
+
+        /// <summary>
         /// Upstream's default is "%localappdata%\NINA\NINA.sqlite" through Environment.ExpandEnvironmentVariables, which on
         /// macOS stays a literal relative file name in the working directory. Off Windows DatabaseInteraction now uses NINA's
         /// data folder, CoreUtil.APPLICATIONTEMPPATH (~/Library/Application Support/NINA unless the host moves it).

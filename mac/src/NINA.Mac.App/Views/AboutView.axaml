@@ -16,7 +16,7 @@
     <ItemsControl ItemsSource="{Binding ThirdParty}">
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="x:String">
-          <TextBlock Text="{Binding}" Classes="muted" />
+          <TextBlock Text="{Binding}" Classes="muted" TextWrapping="Wrap" />
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>

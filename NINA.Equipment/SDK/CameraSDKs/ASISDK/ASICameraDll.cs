@@ -18,10 +18,7 @@ namespace ZWOptical.ASISDK {
         private static readonly Lock lockobj = new ();
 
         static ASICameraDll() {
-            // On other platforms the host registers a NativeLibrary resolver for DLLNAME instead
-            if (OperatingSystem.IsWindows()) {
-                DllLoader.LoadDll(Path.Combine("ASI", DLLNAME));
-            }
+            DllLoader.LoadDll(Path.Combine("ASI", DLLNAME));
         }
 
         public enum ASI_CONTROL_TYPE {
@@ -127,9 +124,8 @@ namespace ZWOptical.ASISDK {
             [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 64)]
             public byte[] name;// char[64]; //the name of the camera, you can display this to the UI
             public int CameraID; //this is used to control everything of the camera in other functions
-            // C "long": 4 bytes on Windows, 8 bytes on 64-bit macOS/Linux
-            private CLong maxHeight; //the max height of the camera
-            private CLong maxWidth;	//the max width of the camera
+            public int MaxHeight; //the max height of the camera
+            public int MaxWidth;	//the max width of the camera
 
             public ASI_BOOL IsColorCam;
             public ASI_BAYER_PATTERN BayerPattern;
@@ -153,10 +149,6 @@ namespace ZWOptical.ASISDK {
             [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 16)]
             public byte[] Unused;
 
-            public int MaxHeight => (int)maxHeight.Value;
-
-            public int MaxWidth => (int)maxWidth.Value;
-
             public string Name {
                 get { return Encoding.ASCII.GetString(name).TrimEnd((char)0); }
             }
@@ -168,21 +160,14 @@ namespace ZWOptical.ASISDK {
             public byte[] name; //the name of the Control like Exposure, Gain etc..
             [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 128)]
             public byte[] description; //description of this control
-            // C "long": 4 bytes on Windows, 8 bytes on 64-bit macOS/Linux
-            private CLong maxValue;
-            private CLong minValue;
-            private CLong defaultValue;
+            public int MaxValue;
+            public int MinValue;
+            public int DefaultValue;
             public ASI_BOOL IsAutoSupported; //support auto set 1, don't support 0
             public ASI_BOOL IsWritable; //some control like temperature can only be read by some cameras 
             public ASI_CONTROL_TYPE ControlType;//this is used to get value and set value of the control
             [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 32)]
             public byte[] Unused;//[32];
-
-            public int MaxValue => (int)maxValue.Value;
-
-            public int MinValue => (int)minValue.Value;
-
-            public int DefaultValue => (int)defaultValue.Value;
 
             public string Name {
                 get { return Encoding.ASCII.GetString(name).TrimEnd((Char)0); }
@@ -190,6 +175,67 @@ namespace ZWOptical.ASISDK {
 
             public string Description {
                 get { return Encoding.ASCII.GetString(description).TrimEnd((Char)0); }
+            }
+        }
+
+        // Native layouts filled by the SDK. Fields the SDK declares as C "long" use CLong: 4 bytes on Windows (identical to the
+        // public structs above), 8 bytes on 64-bit macOS/Linux. The public structs keep their int fields for API compatibility.
+        private struct ASI_CAMERA_INFO_NATIVE {
+            [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 64)]
+            public byte[] name;
+            public int CameraID;
+            public CLong MaxHeight;
+            public CLong MaxWidth;
+            public ASI_BOOL IsColorCam;
+            public ASI_BAYER_PATTERN BayerPattern;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+            public int[] SupportedBins;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+            public ASI_IMG_TYPE[] SupportedVideoFormat;
+            public double PixelSize;
+            public ASI_BOOL MechanicalShutter;
+            public ASI_BOOL ST4Port;
+            public ASI_BOOL IsCoolerCam;
+            public ASI_BOOL IsUSB3Host;
+            public ASI_BOOL IsUSB3Camera;
+            public float ElecPerADU;
+            public int BitDepth;
+            public ASI_BOOL IsTriggerCam;
+            [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 16)]
+            public byte[] Unused;
+
+            public ASI_CAMERA_INFO ToManaged() {
+                return new ASI_CAMERA_INFO {
+                    name = name, CameraID = CameraID, MaxHeight = (int)MaxHeight.Value, MaxWidth = (int)MaxWidth.Value,
+                    IsColorCam = IsColorCam, BayerPattern = BayerPattern, SupportedBins = SupportedBins, SupportedVideoFormat = SupportedVideoFormat,
+                    PixelSize = PixelSize, MechanicalShutter = MechanicalShutter, ST4Port = ST4Port, IsCoolerCam = IsCoolerCam,
+                    IsUSB3Host = IsUSB3Host, IsUSB3Camera = IsUSB3Camera, ElecPerADU = ElecPerADU, BitDepth = BitDepth,
+                    IsTriggerCam = IsTriggerCam, Unused = Unused
+                };
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ASI_CONTROL_CAPS_NATIVE {
+            [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 64)]
+            public byte[] name;
+            [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 128)]
+            public byte[] description;
+            public CLong MaxValue;
+            public CLong MinValue;
+            public CLong DefaultValue;
+            public ASI_BOOL IsAutoSupported;
+            public ASI_BOOL IsWritable;
+            public ASI_CONTROL_TYPE ControlType;
+            [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 32)]
+            public byte[] Unused;
+
+            public ASI_CONTROL_CAPS ToManaged() {
+                return new ASI_CONTROL_CAPS {
+                    name = name, description = description, MaxValue = (int)MaxValue.Value, MinValue = (int)MinValue.Value,
+                    DefaultValue = (int)DefaultValue.Value, IsAutoSupported = IsAutoSupported, IsWritable = IsWritable,
+                    ControlType = ControlType, Unused = Unused
+                };
             }
         }
 
@@ -232,10 +278,10 @@ namespace ZWOptical.ASISDK {
         private static extern int ASIGetNumOfConnectedCameras();
 
         [DllImport(DLLNAME, EntryPoint = "ASIGetCameraProperty", CallingConvention = CallingConvention.Cdecl)]
-        private static extern ASI_ERROR_CODE ASIGetCameraProperty(out ASI_CAMERA_INFO pASICameraInfo, int iCameraIndex);
+        private static extern ASI_ERROR_CODE ASIGetCameraProperty(out ASI_CAMERA_INFO_NATIVE pASICameraInfo, int iCameraIndex);
 
         [DllImport(DLLNAME, EntryPoint = "ASIGetCameraPropertyByID", CallingConvention = CallingConvention.Cdecl)]
-        private static extern ASI_ERROR_CODE ASIGetCameraPropertyByID(int iCameraID, out ASI_CAMERA_INFO pASICameraInfo);
+        private static extern ASI_ERROR_CODE ASIGetCameraPropertyByID(int iCameraID, out ASI_CAMERA_INFO_NATIVE pASICameraInfo);
 
         [DllImport(DLLNAME, EntryPoint = "ASIOpenCamera", CallingConvention = CallingConvention.Cdecl)]
         private static extern ASI_ERROR_CODE ASIOpenCamera(int iCameraID);
@@ -250,7 +296,7 @@ namespace ZWOptical.ASISDK {
         private static extern ASI_ERROR_CODE ASIGetNumOfControls(int iCameraID, out int piNumberOfControls);
 
         [DllImport(DLLNAME, EntryPoint = "ASIGetControlCaps", CallingConvention = CallingConvention.Cdecl)]
-        private static extern ASI_ERROR_CODE ASIGetControlCaps(int iCameraID, int iControlIndex, out ASI_CONTROL_CAPS pControlCaps);
+        private static extern ASI_ERROR_CODE ASIGetControlCaps(int iCameraID, int iControlIndex, out ASI_CONTROL_CAPS_NATIVE pControlCaps);
 
         [DllImport(DLLNAME, EntryPoint = "ASISetControlValue", CallingConvention = CallingConvention.Cdecl)]
         private static extern ASI_ERROR_CODE ASISetControlValue(int iCameraID, ASI_CONTROL_TYPE ControlType, CLong lValue, ASI_BOOL bAuto);
@@ -303,9 +349,6 @@ namespace ZWOptical.ASISDK {
         [DllImport(DLLNAME, EntryPoint = "ASIGetGainOffset", CallingConvention = CallingConvention.Cdecl)]
         private static extern ASI_ERROR_CODE ASIGetGainOffset(int iCameraID, out int Offset_HighestDR, out int Offset_UnityGain, out int Gain_LowestRN, out int Offset_LowestRN);
 
-        [DllImport(DLLNAME, EntryPoint = "ASIGetLMHGainOffset", CallingConvention = CallingConvention.Cdecl)]
-        private static extern ASI_ERROR_CODE ASIGetLMHGainOffset(int iCameraID, out int pLGain, out int pMGain, out int pHGain, out int pHOffset);
-
         [DllImport(DLLNAME, EntryPoint = "ASIGetID", CallingConvention = CallingConvention.Cdecl)]
         private static extern ASI_ERROR_CODE ASIGetID(int iCameraID, out ASI_ID pID);
 
@@ -321,17 +364,17 @@ namespace ZWOptical.ASISDK {
         [SecurityCritical]
         public static ASI_CAMERA_INFO GetCameraProperties(int cameraIndex) {
             using var scope = lockobj.EnterScope();
-            ASI_CAMERA_INFO result;
+            ASI_CAMERA_INFO_NATIVE result;
             CheckReturn(ASIGetCameraProperty(out result, cameraIndex), MethodBase.GetCurrentMethod(), cameraIndex);
-            return result;
+            return result.ToManaged();
         }
 
         [SecurityCritical]
         public static ASI_CAMERA_INFO GetCameraPropertiesByCameraId(int cameraId) {
             using var scope = lockobj.EnterScope();
-            ASI_CAMERA_INFO result;
+            ASI_CAMERA_INFO_NATIVE result;
             CheckReturn(ASIGetCameraPropertyByID(cameraId, out result), MethodBase.GetCurrentMethod(), cameraId);
-            return result;
+            return result.ToManaged();
         }
 
         private static void CheckReturn(ASI_ERROR_CODE errorCode, MethodBase callingMethod, params object[] parameters) {
@@ -403,9 +446,9 @@ namespace ZWOptical.ASISDK {
         [SecurityCritical]
         public static ASI_CONTROL_CAPS GetControlCaps(int cameraIndex, int controlIndex) {
             using var scope = lockobj.EnterScope();
-            ASI_CONTROL_CAPS result;
+            ASI_CONTROL_CAPS_NATIVE result;
             CheckReturn(ASIGetControlCaps(cameraIndex, controlIndex, out result), MethodBase.GetCurrentMethod(), cameraIndex, controlIndex);
-            return result;
+            return result.ToManaged();
         }
 
         [SecurityCritical]
@@ -533,18 +576,6 @@ namespace ZWOptical.ASISDK {
             string version = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(p);
 
             return version;
-        }
-
-        [SecurityCritical]
-        public static void GetGainOffset(int cameraId, out int offsetHighestDR, out int offsetUnityGain, out int gainLowestRN, out int offsetLowestRN) {
-            using var scope = lockobj.EnterScope();
-            CheckReturn(ASIGetGainOffset(cameraId, out offsetHighestDR, out offsetUnityGain, out gainLowestRN, out offsetLowestRN), MethodBase.GetCurrentMethod(), cameraId);
-        }
-
-        [SecurityCritical]
-        public static void GetLMHGainOffset(int cameraId, out int lowGain, out int mediumGain, out int highGain, out int highOffset) {
-            using var scope = lockobj.EnterScope();
-            CheckReturn(ASIGetLMHGainOffset(cameraId, out lowGain, out mediumGain, out highGain, out highOffset), MethodBase.GetCurrentMethod(), cameraId);
         }
 
         [SecurityCritical]

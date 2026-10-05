@@ -46,6 +46,8 @@ namespace NINA.Mac.App.Test.Platform {
             File.WriteAllText(Path.Combine(contents, "Resources", "licenses", "ZWO-LICENSE.txt"), "mit");
             File.WriteAllText(Path.Combine(contents, "MacOS", "JPLEPH"), "wrong copy in MacOS");
             File.WriteAllText(Path.Combine(contents, "Frameworks", "libASICamera2.dylib"), "fw");
+            // AppleDouble file, as unzip or a copy to a non-APFS volume leaves next to each file with extended attributes
+            File.WriteAllText(Path.Combine(contents, "Frameworks", "._libASICamera2.dylib"), "xattrs");
             File.WriteAllText(Path.Combine(contents, "MacOS", "libASICamera2.dylib"), "macos copy");
             File.WriteAllText(Path.Combine(contents, "MacOS", "libSkiaSharp.dylib"), "skia");
             return Path.Combine(contents, "MacOS") + "/";
@@ -69,6 +71,16 @@ namespace NINA.Mac.App.Test.Platform {
             paths.VendorLibraries().Select(Path.GetFileName).Should().Equal("libASICamera2.dylib");
             paths.FindResource("missing.bin").Should().BeNull();
             paths.Invoking(p => p.GetResource("missing.bin")).Should().Throw<FileNotFoundException>().WithMessage("*Contents/Resources*");
+        }
+
+        [Test]
+        public void VendorLibraries_SkipAppleDoubleFiles() {
+            var paths = new ResourcePaths(MakeBundle());
+            File.Exists(Path.Combine(paths.FrameworksDirectory, "._libASICamera2.dylib")).Should().BeTrue();
+            paths.VendorLibraries().Should().OnlyContain(p => !Path.GetFileName(p).StartsWith("._", StringComparison.Ordinal))
+                .And.ContainSingle();
+            ResourcePaths.IsAppleDouble("/x/Contents/Frameworks/._libusb-1.0.0.dylib").Should().BeTrue();
+            ResourcePaths.IsAppleDouble("/x/Contents/Frameworks/libusb-1.0.0.dylib").Should().BeFalse();
         }
 
         [Test]
@@ -139,12 +151,15 @@ namespace NINA.Mac.App.Test.Platform {
             path.Should().NotBeNullOrEmpty();
             Directory.Exists(path).Should().BeTrue(path);
             MacBundle.MainBundleIdentifier().Should().BeNull();
+            // ... and no Info.plist entries (the packaged app's smoke test reads CFBundleName etc. this way)
+            MacBundle.MainBundleInfoString("CFBundleIdentifier").Should().BeNull();
+            MacBundle.MainBundleInfoString("NoSuchKey").Should().BeNull();
         }
     }
 
     [TestFixture]
     public class UserDataPathsTests {
-        private static readonly AppIdentity Identity = new("Nightglass (working name)", "Nightglass", "local.nightglass.mac");
+        private static readonly AppIdentity Identity = new("Nightglass", "Nightglass", "local.nightglass.mac");
 
         [Test]
         public void DefaultFolders() {
@@ -181,11 +196,26 @@ namespace NINA.Mac.App.Test.Platform {
         [TestCase("~/Documents/Astro", true)]
         [TestCase("~/Desktop", true)]
         [TestCase("~/Library/Mobile Documents/com~apple~CloudDocs/astro", true)]
+        [TestCase("~/documents/Astro", true)]        // the home volume is case-insensitive APFS: same folder
+        [TestCase("~/DESKTOP/frames", true)]
+        [TestCase("/Users/astro/documents", true)]
+        [TestCase("~/library/mobile documents/com~apple~CloudDocs", true)]
+        [TestCase("~/Library/CloudStorage/OneDrive-Personal/astro", true)]  // File Provider roots (OneDrive, Dropbox, Google Drive)
+        [TestCase("~/Library/CloudStorage/Dropbox", true)]
         [TestCase("~/DocumentsArchive", false)]
+        [TestCase("~/documentsarchive", false)]
         [TestCase("~/Astro/Nightglass", false)]
+        [TestCase("~/Library/Caches/local.nightglass.mac", false)]
         public void CloudSyncWarning(string path, bool warns) {
             var paths = new UserDataPaths(Identity, "/Users/astro");
             (paths.CloudSyncWarning(path) != null).Should().Be(warns);
+        }
+
+        [Test]
+        public void CloudSyncWarning_NamesTheService() {
+            var paths = new UserDataPaths(Identity, "/Users/astro");
+            paths.CloudSyncWarning("~/documents/astro").Should().Contain("iCloud").And.Contain("/Users/astro/documents/astro");
+            paths.CloudSyncWarning("~/Library/CloudStorage/OneDrive-Personal").Should().Contain("cloud storage provider").And.NotContain("iCloud");
         }
 
         [Test]

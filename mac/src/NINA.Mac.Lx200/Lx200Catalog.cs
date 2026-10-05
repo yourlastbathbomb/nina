@@ -204,6 +204,8 @@ namespace NINA.Mac.Lx200 {
                     "Overwrites LST directly; after alignment it shifts every goto (plan risk 3). Verify with :GS#, never write it."),
                 Block("gT", "GPS time update", "P07 l.228-231",
                     "Takes minutes with the handbox blocked, and on stock 4.2g (no rollover fix) the GPS date it writes is wrong (RVM MNT-08)."),
+                Block("gps", "NMEA GPS data stream on", "P07 l.225-226",
+                    "P07 says it 'turns on' an NMEA stream but documents one '#'-terminated sentence: if more sentences follow on the command link, they land between replies and desynchronise every later reply (plan risk 6). Nothing in M2 needs it."),
                 Block("f-", "Accessory panel power off (LX200GPS/R)", "P07 l.128-132",
                     "Cuts power to the accessory panel; which ports of this rig depend on it is unknown and nothing in M2 needs it."),
                 Block("$Q", "Smart Drive PEC / SmartMount toggles and training", "P07 l.585-612",

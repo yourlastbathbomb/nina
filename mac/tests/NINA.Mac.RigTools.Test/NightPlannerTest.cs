@@ -124,6 +124,44 @@ namespace NINA.Mac.RigTools.Test {
             PlanOne(new PlanTarget("Dec+75", 12, 75)).Flags.Should().HaveFlag(TargetFlags.BlockedByHorizon).And.HaveFlag(TargetFlags.Circumpolar);
         }
 
+        [TestCase(45.0)]
+        [TestCase(40.0)]
+        public void ClearOnlyInsideTheKeyhole_IsBlockedNotBlamedOnDarkness(double dec) {
+            // Review F2: with a 55 deg keyhole, a northern field clears the 60 deg placeholder wall only above 55 deg.
+            // It used to be flagged NotUpInDarkness ("not within the limits during darkness") although it transits
+            // at 21:31, well inside darkness, and can never be imaged.
+            var options = new NightPlanOptions { MaxAltitudeDeg = 55 };
+            var t = PlanOne(new PlanTarget(Invariant($"Dec+{dec}"), 22, dec), options: options);
+
+            // Premise, from the coordinate maths alone (not the planner): over a whole sidereal day there is no
+            // instant above both the placeholder profile and 15 deg while below 55 deg.
+            var horizon = SiteHorizons.DeepWaterBayPlaceholder;
+            var clear = Enumerable.Range(-1200, 2401)
+                .Select(i => SphericalAstronomy.EquatorialToHorizontal(i / 100.0, t.OfDate.DecDeg, 22.25))
+                .Where(hz => hz.AltitudeDeg >= 15 && hz.AltitudeDeg <= 55 && hz.AltitudeDeg >= horizon.GetAltitude(hz.AzimuthDeg))
+                .ToList();
+            clear.Should().BeEmpty();
+
+            t.TransitInDarkness.Should().BeTrue();
+            t.Flags.Should().Be(TargetFlags.BlockedByHorizon | TargetFlags.PassesZenithKeyhole);
+            t.Windows.Should().BeEmpty();
+            t.Notes.Should().Contain(n => n.StartsWith("Never clears the horizon profile and the 15° minimum at any hour angle while below the 55° maximum"));
+            t.Notes.Should().NotContain(n => n.StartsWith("Not within the limits during darkness"));
+        }
+
+        [Test]
+        public void ClearBelowTheKeyhole_StillGetsWindows() {
+            // Controls for the test above. With the default 75 deg keyhole the same Dec +45 field transits at 67 deg,
+            // over the 60 deg wall; with a 55 deg keyhole and no wall it is clear between 15 and 55 deg.
+            var defaultKeyhole = PlanOne(new PlanTarget("Dec+45", 22, 45));
+            defaultKeyhole.Flags.Should().NotHaveFlag(TargetFlags.BlockedByHorizon).And.NotHaveFlag(TargetFlags.NotUpInDarkness);
+            defaultKeyhole.Windows.Should().NotBeEmpty();
+
+            var flat = PlanOne(new PlanTarget("Dec+45", 22, 45), options: new NightPlanOptions { MaxAltitudeDeg = 55, Horizon = HorizonProfile.Flat() });
+            flat.Flags.Should().HaveFlag(TargetFlags.PassesZenithKeyhole).And.NotHaveFlag(TargetFlags.BlockedByHorizon);
+            flat.Windows.Should().NotBeEmpty();
+        }
+
         [Test]
         public void CircumpolarWithFlatHorizon_IsUsableAllNight() {
             var plan = NightPlanner.Plan(Tonight, new[] { Polaris }, new NightPlanOptions { Horizon = HorizonProfile.Flat() });
@@ -278,6 +316,26 @@ namespace NINA.Mac.RigTools.Test {
                 .Should().Throw<ArgumentException>();
             FluentActions.Invoking(() => NightPlanner.Plan(Tonight, new[] { Polaris }, new NightPlanOptions { SampleSeconds = 1 }))
                 .Should().Throw<ArgumentException>();
+        }
+
+        [TestCase(new[] { 0.0, -5.0, 5.0 }, TestName = "Steps rejected: zero and negative (review F4: 'use 0 s')")]
+        [TestCase(new[] { 5.0, 0.0 }, TestName = "Steps rejected: zero")]
+        [TestCase(new[] { -5.0 }, TestName = "Steps rejected: negative")]
+        [TestCase(new[] { 5.0, double.NaN }, TestName = "Steps rejected: NaN")]
+        [TestCase(new[] { 5.0, double.PositiveInfinity }, TestName = "Steps rejected: infinity")]
+        public void ExposureSteps_MustBeFiniteAndPositive(double[] steps) {
+            FluentActions.Invoking(() => NightPlanner.Plan(Tonight, new[] { ClassicTargets.Ngc253 }, new NightPlanOptions { ExposureStepsSeconds = steps }))
+                .Should().Throw<ArgumentException>().WithMessage("Exposure steps must be finite and positive seconds, got *");
+        }
+
+        [Test]
+        public void ExposureSteps_PositiveCustomStepsAreAccepted_AndStillFlagRotationLimits() {
+            // Same Dec +5 transit (~4.0 s at 1 px) as RotationLimited_WhenNoStepFitsNearTransit, with other steps.
+            var t = PlanOne(new PlanTarget("Dec+5", 1.0, 5.0), options: new NightPlanOptions { ExposureStepsSeconds = new[] { 4.5, 15.0 } });
+
+            t.Flags.Should().HaveFlag(TargetFlags.RotationLimited);
+            t.Windows.Should().Contain(w => w.RecommendedSubSeconds == null);
+            t.Notes.Should().Contain(n => n.Contains("below the shortest step (4.5 s)"));
         }
 
         [Test]

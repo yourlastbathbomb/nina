@@ -25,7 +25,7 @@
 # - NOVAS: novas.c is also compiled with csrc/novas_racio.h force-included. That routes its two
 #   fopen("cio_ra.bin") calls through csrc/novas_racio.c, which also provides set_racio_file (the in-repo
 #   source lacks it; NOVAS.cs imports it). By default no CIO file is used: NOVAS computes the CIO RA from
-#   the equinox (what NINA gets on Windows too), independent of the working directory. cio_ra.bin is not
+#   the equinox (presumably what NINA gets on Windows too), independent of the working directory. cio_ra.bin is not
 #   shipped; see novas_racio.c for why and how one could be wired in.
 # - NOVAS vendor warnings silenced after review: -Wmisleading-indentation (novas.c 3435, 7338: layout only),
 #   -Wabsolute-value (novas.c cio_array abs() on long values bounded by the record count),

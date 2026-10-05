@@ -195,18 +195,21 @@ namespace NINA.Mac.Lx200Probe {
                 return;
             }
 
+            // Each form is judged by how :GS# moved from its value before the write, so the mount clock's own error
+            // (a GPS-rollover date, a time set by hand without a fix) cancels out; that error is reported above.
             var st = TxOk($":St{Lx200Format.FormatLatitude(opt.SiteLatitude)}#");
             var sgA = TxOk($":Sg{westForm}#");
             var ggA = TxOk(":Gg#");
-            var errA = LstError(TxOk(":GS#"), opt.SiteLongitudeEast);
+            var errA = SiteLstError(TxOk(":GS#"), opt.SiteLongitudeEast, lstErr);
             var sgB = TxOk($":Sg{signedForm}#");
             var ggB = TxOk(":Gg#");
-            var errB = LstError(TxOk(":GS#"), opt.SiteLongitudeEast);
+            var errB = SiteLstError(TxOk(":GS#"), opt.SiteLongitudeEast, lstErr);
             var okA = sgA.Value == "1" && Math.Abs(errA) <= 15 && Math.Abs(Lx200Format.ParseLongitudeEast(ggA.Value) - opt.SiteLongitudeEast) < 0.02;
             var okB = sgB.Value == "1" && Math.Abs(errB) <= 15 && Math.Abs(Lx200Format.ParseLongitudeEast(ggB.Value) - opt.SiteLongitudeEast) < 0.02;
             s.Conclusions.Add(string.Create(Inv, $":St{Lx200Format.FormatLatitude(opt.SiteLatitude)}# -> '{st.Value}'."));
-            s.Conclusions.Add(string.Create(Inv, $":Sg{westForm}# (0-360 westward, Meade.net/INDIGO) -> '{sgA.Value}', reads back '{Lx200Format.Printable(ggA.Value)}', :GS# {Sec(errA)} s: {(okA ? "WORKS" : "does not give the right site")}."));
-            s.Conclusions.Add(string.Create(Inv, $":Sg{signedForm}# (signed, East negative, INDI-style) -> '{sgB.Value}', reads back '{Lx200Format.Printable(ggB.Value)}', :GS# {Sec(errB)} s: {(okB ? "WORKS" : "does not give the right site")}."));
+            var judged = string.Create(Inv, $"vs the LST for {opt.SiteLongitudeEast:0.00} E with the mount clock's {Sec(lstErr)} s taken out");
+            s.Conclusions.Add(string.Create(Inv, $":Sg{westForm}# (0-360 westward, Meade.net/INDIGO) -> '{sgA.Value}', reads back '{Lx200Format.Printable(ggA.Value)}', :GS# {Sec(errA)} s {judged}: {(okA ? "WORKS" : "does not give the right site")}."));
+            s.Conclusions.Add(string.Create(Inv, $":Sg{signedForm}# (signed, East negative, INDI-style) -> '{sgB.Value}', reads back '{Lx200Format.Printable(ggB.Value)}', :GS# {Sec(errB)} s {judged}: {(okB ? "WORKS" : "does not give the right site")}."));
             var finalForm = okA || !okB ? westForm : signedForm;
             if (finalForm != signedForm) {
                 TxOk($":Sg{finalForm}#");
@@ -230,7 +233,8 @@ namespace NINA.Mac.Lx200Probe {
             mountLatitude = Lx200Format.ParseDegrees(gtF.Value);
             mountLongitudeEast = Lx200Format.ParseLongitudeEast(ggF.Value);
             var errF = LstError(gsF, opt.SiteLongitudeEast);
-            s.Conclusions.Add(string.Create(Inv, $"After writing: :Gt# '{Lx200Format.Printable(gtF.Value)}', :Gg# '{Lx200Format.Printable(ggF.Value)}' ({LongitudeForm(ggF.Value)}), :GG# '{gGF.Value}'; :GS# {gsF.Value} vs LST computed for {opt.SiteLongitudeEast:0.00} E: {Sec(errF)} s ({ExplainLstError(errF)})."));
+            var siteF = SiteLstError(gsF, opt.SiteLongitudeEast, lstErr);
+            s.Conclusions.Add(string.Create(Inv, $"After writing: :Gt# '{Lx200Format.Printable(gtF.Value)}', :Gg# '{Lx200Format.Printable(ggF.Value)}' ({LongitudeForm(ggF.Value)}), :GG# '{gGF.Value}'; :GS# {gsF.Value} vs LST computed for {opt.SiteLongitudeEast:0.00} E: {Sec(errF)} s ({ExplainLstError(errF)}); {Sec(siteF)} s with the mount clock's error taken out."));
             s.Conclusions.Add(string.Create(Inv, $"The mount stores the site to 1' ({mountLatitude:0.0000}°, {mountLongitudeEast:0.0000}°): NINA's 0.001° site tolerance would prompt on every connect (RVM MNT-14); the driver should accept 1'."));
             Document.Changes.Add($"Site: :St{Lx200Format.FormatLatitude(opt.SiteLatitude)}# :Sg{finalForm}# :SG{sgUsed}# :SH0#.");
             s.Summary = string.Create(Inv, $":Gg# form {LongitudeForm(ggF.Value)}; :Sg{westForm}# {(okA ? "ok" : "NO")}, :Sg{signedForm}# {(okB ? "ok" : "NO")}; :SG{sgUsed}#; LST after {Sec(errF)} s ({ExplainLstError(errF)})");
@@ -253,6 +257,15 @@ namespace NINA.Mac.Lx200Probe {
             return Lx200Astro.HourDifference(mount, Lx200Astro.LstHours(at, eastLongitude)) * 3600.0;
         }
 
+        /// <summary>
+        /// <see cref="LstError"/> for <paramref name="eastLongitude"/> minus the mount clock's own LST error
+        /// (<paramref name="clockLstError"/>: the :GS# error before the site was written, at the mount's stored
+        /// longitude). Writing the site moves :GS# by the longitude change only, so this is near 0 when the mount took
+        /// the longitude, however wrong its date or time.
+        /// </summary>
+        private static double SiteLstError(Lx200Reply gs, double eastLongitude, double clockLstError) =>
+            Lx200Astro.HourDifference(LstError(gs, eastLongitude) / 3600.0, clockLstError / 3600.0) * 3600.0;
+
         // =============================================================================================
         // 4. :SC date convention (opt-in)
         // =============================================================================================
@@ -264,9 +277,21 @@ namespace NINA.Mac.Lx200Probe {
                 s.Conclusions.Add("Not run. Until it is, the driver must never write :SC between 00:00 and 08:00 HKT (when the UTC and local dates differ).");
                 return;
             }
-            var warning = "BENCH ONLY - THIS DESTROYS THE ALIGNMENT.\n"
-                + "  The probe sets the mount clock to a simulated 01:00 HKT, writes :SC once with the UTC date and once with the local date,\n"
-                + "  compares :GS# with the computed LST each time, then restores the real date and time from this Mac's clock.\n"
+            if (opt.UtcOffsetHours == 0) {
+                s.Outcome = StepOutcome.Skipped;
+                s.Summary = "not run: at UTC+0 the UTC and local dates are always the same, so the test cannot tell them apart";
+                return;
+            }
+            // A local time at which the UTC date is another day: just after local midnight east of Greenwich (01:00 HKT
+            // = 17:00 UTC the day before), just before it west of Greenwich (23:00 at UTC-5 = 04:00 UTC the day after)
+            var offset = TimeSpan.FromHours(opt.UtcOffsetHours);
+            var fromMidnight = TimeSpan.FromHours(Math.Min(1.0, Math.Abs(opt.UtcOffsetHours) / 2));
+            var simTimeOfDay = opt.UtcOffsetHours > 0 ? fromMidnight : TimeSpan.FromDays(1) - fromMidnight;
+            var warning = "BENCH ONLY - THIS DESTROYS THE ALIGNMENT (which is why this step runs after steps 5-8).\n"
+                + string.Create(Inv, $"  The probe sets the mount clock to a simulated {simTimeOfDay:hh\\:mm} local time (UTC{opt.UtcOffsetHours:+0.##;-0.##}), when the UTC date is another day,\n")
+                + "  writes :SC once with the UTC date and once with the local date, compares :GS# with the computed LST each time,\n"
+                + "  then restores the real date and time from this Mac's clock. If the probe is stopped meanwhile (Ctrl+C, closing\n"
+                + "  the window, kill) it still restores them before it exits: do not stop it a second time.\n"
                 + "  Re-align on the handbox afterwards before trusting any goto.";
             if (!ask.ConfirmStrong(warning, "DESTROY")) {
                 s.Outcome = StepOutcome.Declined;
@@ -276,15 +301,18 @@ namespace NINA.Mac.Lx200Probe {
             }
             s.Observations.Add("Operator typed DESTROY to run the date test.");
             var lon = double.IsNaN(mountLongitudeEast) ? Read(":Gg#", Lx200Format.ParseLongitudeEast) : mountLongitudeEast;
-            var offset = TimeSpan.FromHours(opt.UtcOffsetHours);
             TxOk($":SG{Lx200Format.FormatHoursToUtc(opt.UtcOffsetHours, false)}#");
 
             var nowUtc = link.Trace.UtcNow;
-            var simLocal = (nowUtc + offset).Date.AddHours(1);
+            var simLocal = (nowUtc + offset).Date + simTimeOfDay;
             var simUtc = simLocal - offset;
             s.Notes.Add(string.Create(Inv, $"Simulated time: {simLocal:yyyy-MM-dd HH:mm} local = {simUtc:yyyy-MM-dd HH:mm} UTC; UTC date {Lx200Format.FormatDate(simUtc)}, local date {Lx200Format.FormatDate(simLocal)}."));
             Document.Changes.Add("Date/time: rewritten for the :SC test, then restored from the Mac clock. Re-align before relying on gotos.");
 
+            // If the process dies before the restore, this is what results.md says (the finally below replaces it)
+            s.Summary = "IN PROGRESS: the mount clock is on a test date. If this is still here, the probe was killed before it put the real date back: set the date and time on the handbox";
+            Save();
+            restorePending = true;
             var errors = new Dictionary<string, double>();
             var verdict = "inconclusive";
             try {
@@ -314,11 +342,11 @@ namespace NINA.Mac.Lx200Probe {
                     s.Conclusions.Add("VERDICT: inconclusive (both or neither trial matched). Check the trace; keep the rule 'never write :SC between 00:00 and 08:00 HKT'.");
                 }
             } finally {
-                // Always put the real date and time back, even after an error or Ctrl+C (writing correct values is safe)
+                // Always put the real date and time back, even after an error, Ctrl+C or a signal (writing correct values is safe)
                 RestoreDateTime(s, verdict, lon, offset, out var restoreError);
-                if (errors.Count == 2 || restoreError != null) {
-                    s.Summary = string.Create(Inv, $"{verdict.ToUpperInvariant()}: UTC-date trial {(errors.TryGetValue("UTC date", out var u) ? Sec(u) : "-")} s, local-date trial {(errors.TryGetValue("local date", out var l) ? Sec(l) : "-")} s; restore {(restoreError == null ? "ok" : "FAILED: " + restoreError)}");
-                }
+                restorePending = false;
+                s.Summary = string.Create(Inv, $"{verdict.ToUpperInvariant()}: UTC-date trial {(errors.TryGetValue("UTC date", out var u) ? Sec(u) : "-")} s, local-date trial {(errors.TryGetValue("local date", out var l) ? Sec(l) : "-")} s; restore {(restoreError == null ? "ok" : "FAILED: " + restoreError)}");
+                Save();
             }
         }
 
@@ -358,6 +386,7 @@ namespace NINA.Mac.Lx200Probe {
                 s.Conclusions.Add(string.Create(Inv, $"Restored :SL from the Mac clock and :SC{Lx200Format.FormatDate(dateToWrite)}#: :GS# {gs.Value}, {Sec(errR)} s vs computed ({ExplainLstError(errR)})."));
                 if (Math.Abs(errR) > 15) {
                     error = $"LST {Sec(errR)} s after restore";
+                    s.Conclusions.Add($"RESTORE CHECK FAILED ({error}): set the date and time on the handbox before using the mount.");
                 }
             } catch (Exception ex) {
                 error = ex.Message;
@@ -387,7 +416,7 @@ namespace NINA.Mac.Lx200Probe {
         private void StepGotoSync(StepRecord s) {
             var idle = TxOk(":D#");
             s.Conclusions.Add($":D# while idle: [{(idle.Raw.Length > 0 ? idle.RawHex : "")}] -> {(idle.Value.Trim().Length == 0 ? "null string, as P07 says" : "NOT empty: a slew may still be running")}.");
-            var p = Precision;
+            var p = EnsureHighPrecision(s);
             var start = ReadPos();
             var lst = Read(":GS#", Lx200Format.ParseRaHours);
             var lat = double.IsNaN(mountLatitude) ? Read(":Gt#", Lx200Format.ParseDegrees) : mountLatitude;
@@ -406,6 +435,16 @@ namespace NINA.Mac.Lx200Probe {
             var after = ReadPos();
             var err = Lx200Astro.SeparationDeg(after.Ra, after.Dec, tRa, tDec) * 3600;
             s.Conclusions.Add(string.Create(Inv, $"Goto ended {err:0}\" from the target by the mount's own readback (resolution ~1\" Dec, 15\"·cos δ RA in long format)."));
+            if (err > opt.SyncGuardArcsec) {
+                // The mount is not where the goto should have left it: still slewing with no :D# bar, or it went
+                // elsewhere. A sync here would write a wrong point into the pointing model (RVM MNT-11 guards syncs).
+                var still = Tx(":D#");
+                Halt(":Q#");
+                s.Conclusions.Add(string.Create(Inv, $"The mount's own position is {err / 3600:0.00}° from the goto target (limit {opt.SyncGuardArcsec / 60:0}'), and :D# now answers [{still.RawHex}]: the goto had not really ended (a :D# bar that never showed?) or went elsewhere. Sent :Q#. :CM# NOT sent: a sync here would put a wrong point into the pointing model. Check the trace before relying on :D#."));
+                s.Outcome = StepOutcome.Failed;
+                s.Summary = string.Create(Inv, $"goto ended {err:0}\" from the target (limit {opt.SyncGuardArcsec:0}\"): stopped with :Q#, :CM# NOT sent");
+                return;
+            }
 
             TxOk($":Sr{Lx200Format.FormatRa(tRa, p)}#");
             TxOk($":Sd{Lx200Format.FormatDec(tDec, p)}#");
@@ -427,7 +466,10 @@ namespace NINA.Mac.Lx200Probe {
             s.Summary = string.Create(Inv, $"goto {distance:0}° ok, {err:0}\" off; :CM# {(cmFixed ? "fixed string" : "UNEXPECTED")}; {back}");
         }
 
-        /// <summary>:Sr/:Sd/:MS# then :D# polling. True = arrived, false = refused, null = timed out and stopped.</summary>
+        /// <summary>
+        /// :Sr/:Sd/:MS# then :D# polling. True = arrived, false = refused, null = timed out and stopped. A null :D# in
+        /// the first <see cref="ChecklistOptions.MinimumSlewSeconds"/> after :MS# is not trusted (RVM MNT-04).
+        /// </summary>
         private bool? Goto(StepRecord s, double ra, double dec, CoordinatePrecision p, string label) {
             var sr = TxOk($":Sr{Lx200Format.FormatRa(ra, p)}#");
             var sd = TxOk($":Sd{Lx200Format.FormatDec(dec, p)}#");
@@ -440,8 +482,9 @@ namespace NINA.Mac.Lx200Probe {
                 s.Conclusions.Add($"{label}: :MS# refused with '{Lx200Format.Printable(ms.Joined)}' (1 = below horizon, 2 = above the high limit).");
                 return false;
             }
-            var sw = Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();   // from the '0': the slew is under way
             var polls = 0;
+            var earlyNulls = 0;
             var bars = new SortedSet<string>(StringComparer.Ordinal);
             Lx200Reply firstBar = null, last = null;
             s.Recording = false;
@@ -452,13 +495,17 @@ namespace NINA.Mac.Lx200Probe {
                     polls++;
                     last = d;
                     if (d.Value.Trim().Length == 0) {
-                        break;
+                        if (sw.Elapsed.TotalSeconds >= opt.MinimumSlewSeconds) {
+                            break;
+                        }
+                        earlyNulls++;
+                    } else {
+                        firstBar ??= d;
+                        bars.Add(Lx200Trace.Hex(d.Raw.AsSpan(0, d.Raw.Length - 1)));
                     }
-                    firstBar ??= d;
-                    bars.Add(Lx200Trace.Hex(d.Raw.AsSpan(0, d.Raw.Length - 1)));
                     if (sw.Elapsed.TotalSeconds > opt.GotoTimeoutSeconds) {
                         s.Recording = true;
-                        Tx(":Q#");
+                        Halt(":Q#");
                         s.Conclusions.Add(string.Create(Inv, $"{label}: still slewing after {opt.GotoTimeoutSeconds:0} s, sent :Q#. If the handbox shows 'ENTER to Sync', High Precision pointing is ON (step 2)."));
                         return null;
                     }
@@ -470,7 +517,8 @@ namespace NINA.Mac.Lx200Probe {
                 s.Exchanges.Add(firstBar);
             }
             s.Exchanges.Add(last);
-            s.Conclusions.Add(string.Create(Inv, $"{label}: :MS# -> '0'; :D# polled {polls} times over {sw.Elapsed.TotalSeconds:0.0} s; bar byte(s) while slewing: {(bars.Count > 0 ? string.Join(", ", bars) : "none seen")}; done when :D# returned [{last.RawHex}]."));
+            var early = earlyNulls == 0 ? "" : string.Create(Inv, $"; {earlyNulls} null :D# repl{(earlyNulls == 1 ? "y" : "ies")} in the first {opt.MinimumSlewSeconds:0.0} s after :MS# not trusted (the bar can lag the start of a goto)");
+            s.Conclusions.Add(string.Create(Inv, $"{label}: :MS# -> '0'; :D# polled {polls} times over {sw.Elapsed.TotalSeconds:0.0} s; bar byte(s) while slewing: {(bars.Count > 0 ? string.Join(", ", bars) : "none seen")}{early}; done when :D# returned [{last.RawHex}]."));
             return true;
         }
 
@@ -494,10 +542,10 @@ namespace NINA.Mac.Lx200Probe {
                 Tx(Lx200Format.GuideRateCommand(rate));
                 Document.Changes.Add(string.Create(Inv, $"Guide rate: :Rg{rate:00.0}#."));
             }
-            var p = Precision;
+            var p = EnsureHighPrecision(s);
             var threshold = p == CoordinatePrecision.High ? Math.Max(4, 0.3 * expected) : Math.Max(90, 0.3 * expected);
             if (p == CoordinatePrecision.Low) {
-                s.Notes.Add("Low precision format: positions resolve 1' only, so small pulses cannot be measured. Run step 2 first.");
+                s.Notes.Add("Low precision format: positions resolve 1' only, so small pulses cannot be measured.");
             }
             var lst = Read(":GS#", Lx200Format.ParseRaHours);
             var lat = double.IsNaN(mountLatitude) ? Read(":Gt#", Lx200Format.ParseDegrees) : mountLatitude;
@@ -519,15 +567,23 @@ namespace NINA.Mac.Lx200Probe {
                 s.Conclusions.Add($":Mg{d}{ms:0000}#: {mg[d].Describe(expected, threshold)}");
             }
 
-            // two axes back to back
+            // Two axes back to back, as NINA's DirectGuider sends them (DirectGuider.cs:245-248, RIM MNT-05). A readout
+            // centred halfway through the first pulse tells "concurrent" (the second axis is already moving) from
+            // "queued" (it waits for the first pulse to end); a readout after both pulses tells "dropped"/"cancelled".
+            var readClock = Stopwatch.StartNew();
             var a2 = ReadPos();
-            Tx(Lx200Format.PulseGuideCommand('n', ms));
+            var readSeconds = readClock.Elapsed.TotalSeconds;
+            var firstPulse = Tx(Lx200Format.PulseGuideCommand('n', ms));
             Tx(Lx200Format.PulseGuideCommand('e', ms));
-            Wait((ms / 1000.0) + opt.SettleSeconds);
-            var m1 = ReadPos();
-            Wait(ms / 1000.0);
-            var m2 = ReadPos();
-            var twoAxis = ClassifyTwoAxis(mg['n'], mg['e'], Delta.Measure(a2, m1, drift), Delta.Measure(a2, m2, drift), expected, threshold);
+            double SinceFirstPulse() => (link.Trace.UtcNow - firstPulse.SentUtc).TotalSeconds;
+            Wait((0.5 * ms / 1000.0) - (readSeconds / 2) - SinceFirstPulse());
+            var mid = ReadPos();
+            var midDone = SinceFirstPulse();
+            Wait((2.0 * ms / 1000.0) + opt.SettleSeconds - SinceFirstPulse());
+            var end = ReadPos();
+            // a queued second pulse starts when the first ends: a halfway readout that ends later than that proves nothing
+            var midTooLate = midDone > 0.9 * ms / 1000.0 ? midDone : double.NaN;
+            var twoAxis = ClassifyTwoAxis(mg['n'], mg['e'], Delta.Measure(a2, mid, drift), Delta.Measure(a2, end, drift), expected, threshold, midTooLate, ms);
             s.Conclusions.Add($"Two axes back to back (:Mgn then :Mge at once): {twoAxis}");
 
             var mgMoved = "nsew".Count(d => mg[d].Moved(threshold));
@@ -543,7 +599,7 @@ namespace NINA.Mac.Lx200Probe {
                     var start = Tx($":M{d}#");
                     var elapsed = (link.Trace.UtcNow - start.SentUtc).TotalSeconds;
                     Wait((ms / 1000.0) - elapsed);
-                    var stop = Tx($":Q{d}#");
+                    var stop = Halt($":Q{d}#");
                     Wait(opt.SettleSeconds);
                     var b = ReadPos();
                     rg[d] = Delta.Measure(a, b, drift);
@@ -572,30 +628,55 @@ namespace NINA.Mac.Lx200Probe {
             return $"n {Axis('n')}, s {Axis('s')}, e {Axis('e')}, w {Axis('w')}";
         }
 
-        private static string ClassifyTwoAxis(Delta nSingle, Delta eSingle, Delta atOne, Delta atTwo, double expected, double threshold) {
+        /// <summary>
+        /// Classifies :Mgn + :Mge sent back to back from a readout halfway through the first pulse and one after both.
+        /// <paramref name="midTooLateSeconds"/> is NaN unless the halfway readout ended too late to see a queue.
+        /// </summary>
+        internal static string ClassifyTwoAxis(Delta nSingle, Delta eSingle, Delta atMid, Delta atEnd, double expected, double threshold, double midTooLateSeconds, int ms) {
             if (!nSingle.Moved(threshold) || !eSingle.Moved(threshold)) {
                 return "not classifiable: a single :Mgn or :Mge did not move the mount.";
             }
-            var full = Math.Max(threshold, 0.6 * expected);
-            double N(Delta x) => Math.Abs(x.Along(nSingle));
-            double E(Delta x) => Math.Abs(x.Along(eSingle));
-            string Report() => string.Create(Inv, $"after one pulse time n {N(atOne):0.0}\" e {E(atOne):0.0}\"; after two n {N(atTwo):0.0}\" e {E(atTwo):0.0}\" (expected ~{expected:0}\" each)");
-            if (N(atOne) >= full && E(atOne) >= full) {
-                return "concurrent: both axes moved within one pulse time; " + Report();
+            var full = Math.Max(threshold, 0.6 * expected);       // "this axis did its pulse"
+            var moving = Math.Max(0.5 * threshold, 0.2 * expected);  // "this axis had started" (about half is expected)
+            var (nMid, eMid, separable) = Split(atMid, nSingle, eSingle);
+            var (nEnd, eEnd, _) = Split(atEnd, nSingle, eSingle);
+            var report = string.Create(Inv, $"halfway through the first pulse n {nMid:0.0}\" e {eMid:0.0}\"; after both n {nEnd:0.0}\" e {eEnd:0.0}\" (expected ~{expected:0}\" each)")
+                + (separable ? "" : "; the n and e single-pulse moves point almost the same way, so the split is approximate");
+            if (nEnd >= full && eEnd >= full) {
+                if (!double.IsNaN(midTooLateSeconds)) {
+                    return string.Create(Inv, $"both axes moved, but concurrent and queued cannot be told apart: the halfway readout ended {midTooLateSeconds * 1000:0} ms after the first {ms} ms pulse was sent (rerun with a longer --pulse-ms); ") + report;
+                }
+                return eMid >= moving
+                    ? "concurrent: the second axis was already moving halfway through the first pulse; " + report
+                    : "queued: the second axis only moved after the first pulse ended; " + report;
             }
-            if (N(atOne) >= full && E(atOne) < full && E(atTwo) >= full) {
-                return "queued: the second pulse ran after the first; " + Report();
+            if (nEnd >= full) {
+                return "second pulse DROPPED: only the first axis moved; " + report;
             }
-            if (N(atTwo) >= full && E(atTwo) < full) {
-                return "second pulse DROPPED: only the first axis moved; " + Report();
+            if (eEnd >= full) {
+                return "first pulse cancelled by the second: only the second axis moved; " + report;
             }
-            if (E(atTwo) >= full && N(atTwo) < full) {
-                return "first pulse cancelled by the second: only the second axis moved; " + Report();
-            }
-            return "inconclusive; " + Report();
+            return "inconclusive; " + report;
         }
 
-        private readonly record struct Rates(double Alt, double Az, double Dec, double Ra) {
+        /// <summary>
+        /// Writes a movement as N times the single :Mgn move plus E times the single :Mge move (2x2 solve on the alt/az
+        /// axis arcseconds) and returns both in arcsec along those moves. Unlike a projection, a slant between the two
+        /// directions (e.g. RA/Dec moves seen on alt/az axes) does not leak one axis into the other.
+        /// </summary>
+        internal static (double N, double E, bool Separable) Split(Delta d, Delta n, Delta e) {
+            var nLen = Math.Sqrt((n.Alt * n.Alt) + (n.AzAxis * n.AzAxis));
+            var eLen = Math.Sqrt((e.Alt * e.Alt) + (e.AzAxis * e.AzAxis));
+            var det = (n.Alt * e.AzAxis) - (e.Alt * n.AzAxis);
+            if (nLen < 1e-9 || eLen < 1e-9 || Math.Abs(det) < 0.2 * nLen * eLen) {   // under ~12° apart
+                return (d.Along(n), d.Along(e), false);
+            }
+            var a = ((d.Alt * e.AzAxis) - (e.Alt * d.AzAxis)) / det;
+            var b = ((n.Alt * d.AzAxis) - (d.Alt * n.AzAxis)) / det;
+            return (a * nLen, b * eLen, true);
+        }
+
+        internal readonly record struct Rates(double Alt, double Az, double Dec, double Ra) {
 
             public static Rates Between(Pos a, Pos b) {
                 var dt = Math.Max(0.001, (b.Utc - a.Utc).TotalSeconds);
@@ -608,7 +689,7 @@ namespace NINA.Mac.Lx200Probe {
         }
 
         /// <summary>Movement between two readouts with the baseline drift removed, arcsec on each axis and on the sky.</summary>
-        private readonly record struct Delta(double Alt, double AzAxis, double AzSky, double Dec, double RaAxis, double RaSky) {
+        internal readonly record struct Delta(double Alt, double AzAxis, double AzSky, double Dec, double RaAxis, double RaSky) {
 
             public static Delta Measure(Pos a, Pos b, Rates drift) {
                 var dt = (b.Utc - a.Utc).TotalSeconds;
@@ -663,7 +744,7 @@ namespace NINA.Mac.Lx200Probe {
             }
 
             var ms = opt.FocusMs;
-            if (!ConfirmStep(s, string.Create(Inv, $"Focuser test: the #1209 will MOVE in and out ({ms} ms per move at speeds 1-4, then :FP pulses, then a backlash check).\n  It has no position readout: watch the drawtube (or a star on the camera) and answer the questions. Ctrl+C stops it (:FQ#)."))) {
+            if (!ConfirmStep(s, string.Create(Inv, $"Focuser test: the #1209 will MOVE in and out ({ms} ms per move at speeds 1-4, then :FP pulses, then a backlash check).\n  Start with the drawtube near mid-travel. It has no position readout: watch the drawtube (or a star on the camera) and answer the questions. Ctrl+C stops it (:FQ#)."))) {
                 s.Summary = $":fT# {temp}; moves declined";
                 return;
             }
@@ -700,34 +781,42 @@ namespace NINA.Mac.Lx200Probe {
             }
             s.Conclusions.Add($":FP (mount-timed pulse, P07 l.194) {fpVerdict}: IN answer '{fpIn}', OUT answer '{fpOut}'. {(fpVerdict.StartsWith("works", StringComparison.Ordinal) ? "A virtual-ms move can be one command, free of macOS timing jitter." : "Use host-timed :F+#/:F-# ... :FQ# moves.")}");
 
-            // backlash: run OUT, then reverse IN in 200 ms steps until motion is seen
+            // backlash: run OUT, then reverse IN in steps of about 200 ms until motion is seen. The bracket adds up the
+            // measured run times (from :F+# to :FQ# on the wire), not the requested ones.
             Tx(":F2#");
             HostTimedFocus(inward: false, 2 * ms);
             Wait(0.3);
-            var backlash = "not seen within 1000 ms";
+            string backlash = null;
+            var total = 0.0;
             for (var k = 1; k <= 5; k++) {
                 var before = SimFocus();
-                HostTimedFocus(inward: true, 200);
+                var run = HostTimedFocus(inward: true, 200);
+                var previous = total;
+                total += run;
                 Wait(0.3);
-                var answer = Observe(s, $"Backlash {k}: reversed IN for 200 ms (total {k * 200} ms since reversing). Visible IN motion now? (y/n)", () => SimFocusTruth(before));
+                var answer = Observe(s, string.Create(Inv, $"Backlash {k}: reversed IN for {run:0} ms (total {total:0} ms since reversing). Visible IN motion now? (y/n)"), () => SimFocusTruth(before));
                 var moved = sim != null ? Math.Abs(SimFocus() - before) > 0.5 : answer.StartsWith("y", StringComparison.OrdinalIgnoreCase);
                 if (moved) {
-                    backlash = $"between {(k - 1) * 200} and {k * 200} ms at speed 2";
+                    backlash = string.Create(Inv, $"between {previous:0} and {total:0} ms at speed 2");
                     break;
                 }
             }
+            backlash ??= string.Create(Inv, $"not seen within {total:0} ms");
             s.Conclusions.Add($"Backlash after a reversal: {backlash}. Use NINA's backlash compensation on the virtual-ms position rather than adding it in the driver.");
             Document.Changes.Add("Focus speed: left at 2 (:F2#); drawtube near where it started (in/out moves were paired).");
             s.Summary = $":fT# {temp}; :FP {fpVerdict}; backlash {backlash}";
         }
 
-        /// <summary>Starts the focuser, waits until <paramref name="ms"/> after the start byte left, sends :FQ# twice. Returns the measured run time.</summary>
+        /// <summary>
+        /// Starts the focuser, waits until <paramref name="ms"/> after the start byte left, sends :FQ# (which the mount
+        /// must accept) and a second :FQ# right after it in case the first is missed. Returns the measured run time.
+        /// </summary>
         private double HostTimedFocus(bool inward, int ms) {
             var start = Tx(inward ? ":F+#" : ":F-#");
             var elapsed = (link.Trace.UtcNow - start.SentUtc).TotalSeconds;
             Wait((ms / 1000.0) - elapsed);
-            var stop = Tx(":FQ#");
-            Tx(":FQ#");
+            var stop = Halt(":FQ#");
+            link.Send(":FQ#");
             return (stop.SentUtc - start.SentUtc).TotalMilliseconds;
         }
 
@@ -747,6 +836,7 @@ namespace NINA.Mac.Lx200Probe {
             if (!ConfirmStep(s, string.Create(Inv, $"Tracking test: :AL# switches to Land mode (tracking OFF) for {wait:0} s, then :AA# returns to alt-az tracking.\n  The drives stop and restart; no slew."))) {
                 return;
             }
+            EnsureHighPrecision(s);   // the tracking verdict needs 1 s RA and 1" Dec
             var a = Snapshot();
             Tx(":AL#");
             Wait(wait);
@@ -768,17 +858,25 @@ namespace NINA.Mac.Lx200Probe {
             var tracking = Math.Abs(raTrack) <= 2 && Math.Abs(decTrack) <= 10;
             s.Conclusions.Add(string.Create(Inv, $"After :AA#, over {(d.Utc - c.Pos.Utc).TotalSeconds:0.0} s: RA {raTrack:+0;-0} s, Dec {decTrack:+0;-0}\": {(tracking ? "tracking resumed" : "NOT tracking")}."));
             var jump = Lx200Astro.SeparationDeg(b.Pos.Ra, b.Pos.Dec, c.Pos.Ra, c.Pos.Dec);   // tracking resumes at :AA#, so RA/Dec should continue from b
-            var alignBefore = a.Gw.Length >= 3 ? a.Gw[2] : '?';
-            var alignAfter = c.Gw.Length >= 3 ? c.Gw[2] : '?';
-            var kept = alignBefore == alignAfter && alignBefore != '0' && jump < 0.1;
-            s.Conclusions.Add(string.Create(Inv, $"Alignment: :GW# third char '{alignBefore}' -> '{alignAfter}', no position jump > 0.1° ({jump:0.000}°): {(kept ? "KEPT. The driver may use :AL#/:AA# for tracking off/on." : "LOST or unclear: do not use :AL# for 'tracking off'; check the handbox.")}"));
-            s.Summary = $"{a.Ack}->{b.Ack}->{c.Ack}; :GW# {a.Gw}->{b.Gw}->{c.Gw}; alignment {(kept ? "kept" : "LOST/unclear")}; tracking {(tracking ? "resumed" : "NOT resumed")}";
+            string alignment;
+            if (a.Align is not char alignBefore || c.Align is not char alignAfter) {
+                // without a 3-character :GW# reply the alignment state cannot be read, and the RA/Dec jump alone does not show it was kept
+                alignment = "unreadable (no :GW#)";
+                s.Conclusions.Add(string.Create(Inv, $"Alignment state unreadable: :GW# gave '{a.Gw}' -> '{c.Gw}', not a 3-character mode/tracking/alignment reply. RA/Dec jump at :AA# {jump:0.000}° (limit 0.1°), which alone cannot show the alignment was kept: check the handbox (alignment status) before using :AL# for 'tracking off'."));
+            } else {
+                var kept = alignBefore == alignAfter && alignBefore != '0' && jump < 0.1;
+                alignment = kept ? "kept" : "LOST/unclear";
+                s.Conclusions.Add(string.Create(Inv, $"Alignment: :GW# third char '{alignBefore}' -> '{alignAfter}', RA/Dec jump at :AA# {jump:0.000}° (limit 0.1°): {(kept ? "KEPT. The driver may use :AL#/:AA# for tracking off/on." : "LOST or unclear: do not use :AL# for 'tracking off'; check the handbox.")}"));
+            }
+            s.Summary = $"{a.Ack}->{b.Ack}->{c.Ack}; :GW# {a.Gw}->{b.Gw}->{c.Gw}; alignment {alignment}; tracking {(tracking ? "resumed" : "NOT resumed")}";
         }
 
-        private (string Ack, string Gw, Pos Pos) Snapshot() {
+        /// <summary>ACK, :GW# and the position. Align is :GW#'s third character, or null when :GW# gave no 3-character reply.</summary>
+        private (string Ack, string Gw, char? Align, Pos Pos) Snapshot() {
             var ack = link.Ack();
             var gw = Tx(":GW#");
-            return (ack.IsOk ? ack.Value : "?", gw.IsOk ? Lx200Format.Printable(gw.Value) : $"({gw.Status})", ReadPos());
+            char? align = gw.IsOk && gw.Value.Length == 3 ? gw.Value[2] : null;
+            return (ack.IsOk ? ack.Value : "?", gw.IsOk ? Lx200Format.Printable(gw.Value) : $"({gw.Status})", align, ReadPos());
         }
 
         private static string ModeName(char c) => c switch {

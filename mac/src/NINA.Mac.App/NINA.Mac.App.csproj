@@ -21,13 +21,13 @@
   </PropertyGroup>
 
   <!--
-    App identity. The fork has no name yet and it must not contain "NINA" (MAC_PORT_PLAN.md section 10).
+    App identity. The fork is called Nightglass; its names must never contain "NINA" (MAC_PORT_PLAN.md section 10).
     AppDisplayName is the single knob: override it with -p:AppDisplayName="..." or here. Everything else is
-    derived: AppShortName drops a parenthetical ("Nightglass (working name)" -> "Nightglass") and names the
-    executable, the data folders and the bundle id.
+    derived: AppShortName drops any parenthetical ("Name (beta)" -> "Name") and names the executable, the data
+    folders and the bundle id.
   -->
   <PropertyGroup Label="App identity">
-    <AppDisplayName Condition="'$(AppDisplayName)' == ''">Nightglass (working name)</AppDisplayName>
+    <AppDisplayName Condition="'$(AppDisplayName)' == ''">Nightglass</AppDisplayName>
     <AppShortName Condition="'$(AppShortName)' == ''">$([System.Text.RegularExpressions.Regex]::Replace('$(AppDisplayName)', '\s*\([^)]*\)', '').Trim())</AppShortName>
     <AppExecutableName Condition="'$(AppExecutableName)' == ''">$(AppShortName.Replace(' ', ''))</AppExecutableName>
     <AppBundleId Condition="'$(AppBundleId)' == ''">local.$(AppExecutableName.ToLowerInvariant()).mac</AppBundleId>
@@ -42,16 +42,36 @@
     <AssemblyMetadata Include="NinaBaseVersion" Value="$(NinaBaseVersion)" />
   </ItemGroup>
 
+  <!--
+    Every user-visible name (display name, CFBundleName/data folders, executable, bundle id) is checked with
+    everything but letters removed, so "N.I.N.A.", "N I N A" and "local.nina.mac" are all rejected. Same rule as
+    AppInfo.ContainsNina (smoke test) and mac/packaging/package-app.sh.
+  -->
   <Target Name="CheckAppIdentity" BeforeTargets="CoreCompile">
-    <Error Condition="$(AppDisplayName.Replace('.', '').ToUpperInvariant().Contains('NINA'))" Text="AppDisplayName '$(AppDisplayName)' contains 'NINA'. MPL-2.0 grants no trademark rights; the fork needs its own name (credit it as 'based on N.I.N.A.')." />
+    <PropertyGroup>
+      <_AppDisplayNameLetters>$([System.Text.RegularExpressions.Regex]::Replace('$(AppDisplayName)', '[^\p{L}]', '').ToUpperInvariant())</_AppDisplayNameLetters>
+      <_AppShortNameLetters>$([System.Text.RegularExpressions.Regex]::Replace('$(AppShortName)', '[^\p{L}]', '').ToUpperInvariant())</_AppShortNameLetters>
+      <_AppExecutableNameLetters>$([System.Text.RegularExpressions.Regex]::Replace('$(AppExecutableName)', '[^\p{L}]', '').ToUpperInvariant())</_AppExecutableNameLetters>
+      <_AppBundleIdLetters>$([System.Text.RegularExpressions.Regex]::Replace('$(AppBundleId)', '[^\p{L}]', '').ToUpperInvariant())</_AppBundleIdLetters>
+      <_AppNameRule>MPL-2.0 grants no trademark rights; the fork needs its own name (credit it as 'based on N.I.N.A.'). Spaces and punctuation are ignored when checking.</_AppNameRule>
+    </PropertyGroup>
+    <Error Condition="$(_AppDisplayNameLetters.Contains('NINA'))" Text="AppDisplayName '$(AppDisplayName)' contains 'NINA'. $(_AppNameRule)" />
+    <Error Condition="$(_AppShortNameLetters.Contains('NINA'))" Text="AppShortName '$(AppShortName)' (CFBundleName, data folders) contains 'NINA'. $(_AppNameRule)" />
+    <Error Condition="$(_AppExecutableNameLetters.Contains('NINA'))" Text="AppExecutableName '$(AppExecutableName)' contains 'NINA'. $(_AppNameRule)" />
+    <Error Condition="$(_AppBundleIdLetters.Contains('NINA'))" Text="AppBundleId '$(AppBundleId)' contains 'NINA'. $(_AppNameRule)" />
     <Error Condition="'$(AppShortName)' == ''" Text="AppShortName is empty (derived from AppDisplayName '$(AppDisplayName)')." />
   </Target>
 
   <ItemGroup>
-    <!-- macOS only: Avalonia.Native (AppKit windowing) + Avalonia.Skia instead of Avalonia.Desktop, which would also ship the Win32 and X11 backends -->
+    <!--
+      macOS only: Avalonia.Native (AppKit windowing) + Avalonia.Skia (rendering) + Avalonia.HarfBuzz (text shaping)
+      instead of Avalonia.Desktop, which would also ship the Win32 and X11 backends. Program.BuildAvaloniaApp() must
+      call all three; the startup check (run by the smoke test) fails if one is missing.
+    -->
     <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Avalonia.Native" Version="12.1.3" />
     <PackageReference Include="Avalonia.Skia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.3" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

@@ -136,6 +136,38 @@ namespace NINA.Mac.Siril.Test {
             }
         }
 
+        [TestCase("NGC 253", true)]
+        [TestCase("Thor's Helmet", true)]
+        [TestCase("C/2020 F3 NEOWISE", true)]       // both map '/' to '-'
+        [TestCase("  M 42 ", true)]                 // both trim
+        [TestCase("M42: Orion", true)]              // both write '_' for Windows' invalid characters (fork CoreUtil patch)
+        [TestCase("Sh2-155 \"Cave\"", true)]
+        [TestCase("M31*Core?<|>", true)]
+        [TestCase("Price $5", false)]               // NINA keeps '$', the layout writes '_' (Siril token delimiter)
+        [TestCase(".hidden", false)]
+        [TestCase("tab\there", true)]               // control characters are in Windows' invalid set
+        public void NinaPatterns_GiveTheLayoutPaths_ExactlyWhenNinaKeepsTheFolderName(string name, bool same) {
+            var start = Hkt(2026, 10, 3, 22, 15, 30);
+
+            SessionLayout.KeepsNinaFolderName(name).Should().Be(same);
+            foreach (var (type, exposure) in new[] { ("LIGHT", 20.0), ("FLAT", 1.5), ("BIAS", 0.0001) }) {
+                var frame = NinaFrames.Info(type, start, 12, exposure, name, rig);
+                var nina = Path.Combine(Root, NinaFilePatterns.Expand(NinaFilePatterns.PatternFor(type), frame, SessionLayout.HongKong)) + ".fits";
+                var ours = layout.GetFramePath(frame);
+
+                (nina == ours).Should().Be(same, $"{type} of '{name}': NINA pattern {nina}, layout {ours}");
+            }
+        }
+
+        [Test]
+        public void NinaPatterns_PutUntitledLightsInTheNightFolder_TheLayoutInUntitled() {
+            var frame = NinaFrames.Info("LIGHT", Hkt(2026, 10, 3, 22, 15, 30), 1, 20, null, rig);
+
+            SessionLayout.KeepsNinaFolderName(null).Should().BeFalse();
+            NinaFilePatterns.Expand(NinaFilePatterns.Light, frame, SessionLayout.HongKong).Should().StartWith("2026-10-03/lights/");
+            layout.GetFramePath(frame).Should().StartWith($"{Root}/2026-10-03/untitled/lights/");
+        }
+
         [Test]
         public void ImageTypeDirToken_RoutesSnapshotsAndDarkFlats_WhereStockPatternsCannot() {
             var start = Hkt(2026, 10, 3, 22, 15, 30);

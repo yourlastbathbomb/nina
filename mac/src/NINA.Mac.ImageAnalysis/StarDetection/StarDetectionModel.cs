@@ -109,6 +109,19 @@ namespace NINA.Mac.ImageAnalysis {
         /// <summary>Number of blobs found before any filtering (diagnostic).</summary>
         public int BlobCount { get; set; }
 
+        /// <summary>
+        /// Fork diagnostic: the band of star radii (full-frame pixels) the final radius filter kept, mean - 1.5 sigma to
+        /// mean + 1.5 sigma (+ 2 sigma at Highest sensitivity), as upstream computes it (StarDetection.cs:774-782).
+        /// NaN when no star reached the filter, or when upstream's one-pass sigma is NaN (see README, proposed patch 1).
+        /// </summary>
+        public (double Low, double High) RadiusFilterBand { get; set; } = (double.NaN, double.NaN);
+
+        /// <summary>
+        /// Fork diagnostic: stars that passed every per-blob check and were then removed by the radius filter, in blob
+        /// order. Does not change any result.
+        /// </summary>
+        public List<DetectedStar> RadiusFilterRejected { get; set; } = new List<DetectedStar>();
+
         /// <summary>Wall time per detection stage (diagnostic; upstream logs the same stages via MyStopWatch).</summary>
         public List<(string Stage, System.TimeSpan Elapsed)> StageTimes { get; } = new List<(string, System.TimeSpan)>();
     }

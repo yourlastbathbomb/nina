@@ -78,7 +78,7 @@ namespace NINA.Mac.Lx200.Test {
         [Test]
         public void Blocklist_HasParkAndAReasonForEach() {
             var blocked = Lx200Catalog.BlockedCommands.Select(c => c.Code).ToList();
-            blocked.Should().Contain(new[] { "hP", "hN", "hF", "hC", "I", "Aa", "AP", "SB", "SS", "gT", "f-", "$Q", "$B" });
+            blocked.Should().Contain(new[] { "hP", "hN", "hF", "hC", "I", "Aa", "AP", "SB", "SS", "gT", "gps", "f-", "$Q", "$B" });
             foreach (var c in Lx200Catalog.BlockedCommands) {
                 c.BlockedReason.Should().NotBeNullOrWhiteSpace(c.Code);
                 c.Source.Should().StartWith("P07", c.Code);
@@ -136,6 +136,21 @@ namespace NINA.Mac.Lx200.Test {
         public void Command_InnerColonSegmentThatIsBlocked_IsBlocked() {
             Lx200Command.Parse(":Q:hP#").Spec.IsBlocked.Should().BeTrue();
             Lx200Command.Parse(":Sr12:hP#").Spec.Code.Should().Be("hP");
+        }
+
+        [TestCase(": hP#")]
+        [TestCase(":h P#")]
+        [TestCase(":Q: hP#")]
+        [TestCase(": I#")]
+        public void Command_BlockedCodeHiddenBySpaces_IsBlocked(string text) {
+            Lx200Command.Parse(text).Spec.IsBlocked.Should().BeTrue(text);
+        }
+
+        [Test]
+        public void Command_SpacesInLegitimateArguments_StayLegitimate() {
+            Lx200Command.Parse(":SL01:00:00#").Spec.IsBlocked.Should().BeFalse();
+            Lx200Command.Parse(":Sr05:35:17#").Spec.Code.Should().Be("Sr");
+            Lx200Command.Parse(":XY Home Site#").Spec.Should().BeNull("an unknown command stays unknown (treated as motion), not blocked");
         }
     }
 

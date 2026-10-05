@@ -111,13 +111,22 @@ namespace NINA.Mac.Platform {
             return Find(NativeLibrarySearchDirectories, fileName, File.Exists);
         }
 
-        /// <summary>Every *.dylib in the vendor library directory (Contents/Frameworks in a bundle).</summary>
+        /// <summary>
+        /// Every *.dylib in the vendor library directory (Contents/Frameworks in a bundle), skipping AppleDouble
+        /// "._name.dylib" files. Those hold extended attributes, not code; unzip and copies to non-APFS volumes create them.
+        /// </summary>
         public IReadOnlyList<string> VendorLibraries() {
             if (!Directory.Exists(FrameworksDirectory)) {
                 return Array.Empty<string>();
             }
-            return Directory.GetFiles(FrameworksDirectory, "*.dylib").OrderBy(f => f, StringComparer.Ordinal).ToArray();
+            return Directory.GetFiles(FrameworksDirectory, "*.dylib")
+                .Where(f => !IsAppleDouble(f))
+                .OrderBy(f => f, StringComparer.Ordinal)
+                .ToArray();
         }
+
+        /// <summary>True for an AppleDouble metadata file ("._" + the name of the file whose attributes it carries).</summary>
+        public static bool IsAppleDouble(string path) => Path.GetFileName(path).StartsWith("._", StringComparison.Ordinal);
 
         private static string Find(IEnumerable<string> directories, string relativePath, Func<string, bool> exists) {
             ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);

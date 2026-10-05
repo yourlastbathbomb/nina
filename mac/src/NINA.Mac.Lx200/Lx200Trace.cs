@@ -69,14 +69,19 @@ namespace NINA.Mac.Lx200 {
     public sealed class Lx200Trace : IDisposable {
         private readonly object sync = new();
         private readonly Stopwatch clock = Stopwatch.StartNew();
-        private readonly DateTime startUtc = DateTime.UtcNow;
+        private readonly DateTime startUtc;
         private readonly List<TraceEntry> entries = new();
         private readonly int maxEntries;
         private TextWriter writer;
 
-        public Lx200Trace(TextWriter writer = null, int maxEntries = 200_000) {
+        /// <param name="startUtc">
+        /// What <see cref="UtcNow"/> reads at the start (default: the system clock). Tests set it to run the probe at a
+        /// chosen time of day, e.g. just after local midnight for the date test.
+        /// </param>
+        public Lx200Trace(TextWriter writer = null, int maxEntries = 200_000, DateTime? startUtc = null) {
             this.writer = writer;
             this.maxEntries = maxEntries;
+            this.startUtc = startUtc ?? DateTime.UtcNow;
         }
 
         public static Lx200Trace ToFile(string path) {

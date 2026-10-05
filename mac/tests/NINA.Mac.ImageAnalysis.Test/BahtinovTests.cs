@@ -98,6 +98,69 @@ namespace NINA.Mac.ImageAnalysis.Test {
             errors.Should().OnlyContain(e => e <= 1.0);
         }
 
+        private static BahtinovResult RenderAndAnalyzeRobust(int crop, double spikeSigma, double outerHalfAngle, double angle, double offset) {
+            var img = BahtinovPattern.Render(crop, crop, (crop / 2.0) + 0.4, (crop / 2.0) - 0.4, angle, outerHalfAngle, offset, seed: (int)((angle * 10) + offset + 100), spikeSigma: spikeSigma);
+            return BahtinovAnalyzer.AnalyzeRobust(img);
+        }
+
+        /// <summary>
+        /// The true offset expressed along the result's <see cref="BahtinovResult.Normal"/>. The pattern's offset is
+        /// along n = (-sin a, cos a). Without a previous result, a central spike measured across the 0/180 degree wrap
+        /// gets the opposite normal, which is a convention flip, not an error.
+        /// </summary>
+        private static double ExpectedSignedOffset(double angle, double offset, BahtinovResult r) {
+            double a = angle * Math.PI / 180;
+            return offset * ((-Math.Sin(a) * r.Normal.X) + (Math.Cos(a) * r.Normal.Y));
+        }
+
+        /// <summary>
+        /// Validated range of AnalyzeRobust beyond the pattern family above: spike sigma 1.5-3 px with 200 px crops and
+        /// 3.5-4 px with 300 px crops, and outer half-angles 12-28 degrees. Every pattern must succeed within 1 px.
+        /// </summary>
+        [TestCase(200, 1.5, 17)]
+        [TestCase(200, 3.0, 17)]
+        [TestCase(300, 3.5, 17)]
+        [TestCase(300, 4.0, 17)]
+        [TestCase(300, 2.2, 12)]
+        [TestCase(300, 2.2, 22)]
+        [TestCase(300, 2.2, 28)]
+        public void Robust_ValidatedRange_IsAccurate(int crop, double spikeSigma, double outerHalfAngle) {
+            var results = (from angle in RobustAngles from offset in Offsets select (angle, offset)).AsParallel().AsOrdered()
+                .Select(c => (c.angle, c.offset, r: RenderAndAnalyzeRobust(crop, spikeSigma, outerHalfAngle, c.angle, c.offset))).ToList();
+            foreach (var (angle, offset, r) in results) {
+                r.Success.Should().BeTrue($"angle {angle} offset {offset}");
+                r.SignedOffset.Should().BeApproximately(ExpectedSignedOffset(angle, offset, r), 1.0, $"angle {angle} offset {offset}");
+            }
+            TestContext.Out.WriteLine($"crop {crop}, spike sigma {spikeSigma}, half-angle {outerHalfAngle}: max |error| {results.Max(x => Math.Abs(x.r.SignedOffset - ExpectedSignedOffset(x.angle, x.offset, x.r))):F3} px over {results.Count} patterns");
+        }
+
+        /// <summary>
+        /// Outside the validated range (spikes as wide as 3.5-5 px sigma, i.e. bin 1 in 2-3" seeing on this rig, and
+        /// 150-300 px crops), AnalyzeRobust loses spike edges. It must then report Success = false rather than a
+        /// confident wrong offset: every result it does accept has the right sign and is within 1.5 px.
+        /// </summary>
+        [Test]
+        public void Robust_OutsideTheValidatedRange_FailsRatherThanReportingAWrongOffset() {
+            var cases = (from crop in new[] { 150, 200, 300 }
+                         from sigma in new[] { 3.5, 4.0, 5.0 }
+                         from half in new[] { 12.0, 17.0 }
+                         from angle in new double[] { 0, 30, 62, 90, 120, 170 }
+                         from offset in new double[] { -8, -4, -2, 2, 4, 8 }
+                         select (crop, sigma, half, angle, offset)).ToList();
+            var results = cases.AsParallel().AsOrdered().Select(c => (c, r: RenderAndAnalyzeRobust(c.crop, c.sigma, c.half, c.angle, c.offset))).ToList();
+            var accepted = results.Where(x => x.r.Success).ToList();
+            double worst = accepted.Select(x => Math.Abs(x.r.SignedOffset - ExpectedSignedOffset(x.c.angle, x.c.offset, x.r))).DefaultIfEmpty(0).Max();
+            TestContext.Out.WriteLine($"{results.Count} patterns: {accepted.Count} accepted (max |error| {worst:F3} px), {results.Count - accepted.Count} refused");
+
+            foreach (var (c, r) in accepted) {
+                double expected = ExpectedSignedOffset(c.angle, c.offset, r);
+                Math.Sign(r.SignedOffset).Should().Be(Math.Sign(expected), $"{c}: measured {r.SignedOffset:F2}");
+                r.SignedOffset.Should().BeApproximately(expected, 1.5, $"{c}");
+            }
+            accepted.Should().NotBeEmpty();
+            accepted.Count.Should().BeLessThan(results.Count, "wide spikes in small crops must be refused");
+        }
+
         [Test]
         public void Robust_AgreesWithNina_WhenUpstreamSucceeds() {
             int compared = 0;

@@ -31,14 +31,16 @@ namespace NINA.Mac.RigTools.Horizon {
             Reason = reason;
         }
 
-        /// <summary>1-based line number in the file.</summary>
+        /// <summary>1-based line number in the file, or 0 for an issue about the file as a whole.</summary>
         public int LineNumber { get; }
 
+        /// <summary>The raw line, or empty for a whole-file issue.</summary>
         public string Line { get; }
+
         public string Reason { get; }
 
         public override string ToString() {
-            return $"line {LineNumber}: {Reason}: '{Line}'";
+            return LineNumber > 0 ? $"line {LineNumber}: {Reason}: '{Line}'" : Reason;
         }
     }
 
@@ -57,7 +59,10 @@ namespace NINA.Mac.RigTools.Horizon {
         /// <summary>Non-blank, non-comment lines that did not give a point. Upstream only logs these.</summary>
         public IReadOnlyList<HorizonParseIssue> RejectedLines { get; }
 
-        /// <summary>Accepted lines worth a look, e.g. a duplicate azimuth that replaced an earlier altitude.</summary>
+        /// <summary>
+        /// Accepted input worth a look: a duplicate azimuth that replaced an earlier altitude, or (line 0) a file
+        /// with no point at 0 or 360, whose wrap across north is copied rather than interpolated.
+        /// </summary>
         public IReadOnlyList<HorizonParseIssue> Warnings { get; }
 
         /// <summary>Distinct points read from the file, before 0/360 grooming.</summary>
@@ -81,6 +86,10 @@ namespace NINA.Mac.RigTools.Horizon {
     /// rejected; upstream accepts them.</item>
     /// <item>A repeated azimuth still replaces the earlier altitude (upstream SortedDictionary behaviour) but is
     /// reported as a warning.</item>
+    /// <item>A file with no point at 0 or 360 still gets upstream's grooming (both ends copy the altitude of the
+    /// point nearest an end, not a line across north), but is reported as a warning naming the copied altitude
+    /// and what a straight line across north would give (<see cref="MissingWrapWarning"/>). The MW4 reader does
+    /// the same.</item>
     /// </list>
     /// <para>
     /// MountWizzard4 format (.hpts): a JSON array of [altitude, azimuth] pairs, with the structure and range checks
@@ -183,7 +192,34 @@ namespace NINA.Mac.RigTools.Horizon {
 
             var pointCount = map.Count;
             var profile = HorizonProfile.FromPoints(map.Select(kv => new HorizonPoint(kv.Key, kv.Value)), source, isPlaceholder);
+            var wrap = MissingWrapWarning(map);
+            if (wrap != null) {
+                warnings.Add(wrap);
+            }
             return new HorizonParseResult(profile, rejected, warnings, pointCount);
+        }
+
+        /// <summary>
+        /// Whole-file warning (line 0) when the points include neither azimuth 0 nor 360. Upstream's grooming
+        /// (<see cref="HorizonProfile.WrapSourceAzimuth"/>, CustomHorizon.cs:58-68) then copies one end point's
+        /// altitude to both 0 and 360 instead of joining the last and first points across north, which can put the
+        /// horizon tens of degrees too low or too high there (e.g. points at 345: 60 and 15: 10 give 26.7 at
+        /// azimuth 355, where a straight line gives 43.3). The profile keeps upstream's values for parity; this
+        /// only says so. Null when 0 or 360 is present, or with fewer than two points.
+        /// </summary>
+        public static HorizonParseIssue MissingWrapWarning(IReadOnlyDictionary<double, double> points) {
+            if (points == null || points.Count < 2 || points.ContainsKey(0) || points.ContainsKey(360)) {
+                return null;
+            }
+            var first = points.OrderBy(kv => kv.Key).First();
+            var last = points.OrderBy(kv => kv.Key).Last();
+            var key = HorizonProfile.WrapSourceAzimuth(points.Keys);
+            // Straight line from the last point, across north, to the first point, evaluated at azimuth 0.
+            var gap = 360.0 - last.Key + first.Key;
+            var straight = last.Value + (first.Value - last.Value) * (360.0 - last.Key) / gap;
+            var reason = FormattableString.Invariant(
+                $"file has no point at azimuth 0 or 360: both get {points[key]}°, copied from azimuth {key} as upstream NINA does, so the horizon between azimuth {last.Key} and {first.Key} is not interpolated across north (a straight line would give {straight:0.##}° at azimuth 0); add a point at 0 or 360");
+            return new HorizonParseIssue(0, string.Empty, reason);
         }
 
         /// <summary>Newtonsoft's JsonTextReader, which upstream uses, skips comments and accepts trailing commas.</summary>
@@ -232,7 +268,9 @@ namespace NINA.Mac.RigTools.Horizon {
             }
             var pointCount = map.Count;
             var profile = HorizonProfile.FromPoints(map.Select(kv => new HorizonPoint(kv.Key, kv.Value)), source);
-            return new HorizonParseResult(profile, Array.Empty<HorizonParseIssue>(), Array.Empty<HorizonParseIssue>(), pointCount);
+            var wrap = MissingWrapWarning(map);
+            var warnings = wrap == null ? Array.Empty<HorizonParseIssue>() : new[] { wrap };
+            return new HorizonParseResult(profile, Array.Empty<HorizonParseIssue>(), warnings, pointCount);
         }
 
         /// <summary>

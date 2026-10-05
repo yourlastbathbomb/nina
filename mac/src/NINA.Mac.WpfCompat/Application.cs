@@ -13,6 +13,7 @@
 #endregion "copyright"
 
 using System.Collections;
+using System.Threading;
 using System.Windows.Threading;
 
 namespace System.Windows {
@@ -21,7 +22,9 @@ namespace System.Windows {
     /// Stand-in for WPF's Application object. As in WPF, <see cref="Current"/> is null until the host constructs one,
     /// and the instance belongs to the constructing thread's <see cref="Dispatcher"/>. Engine code that dispatches
     /// through <c>Application.Current.Dispatcher</c> (e.g. ProfileService events) needs the host to create it once at
-    /// startup, on its UI thread if it has one. Windows, styles and the WPF lifetime (Run/Shutdown) do not exist.
+    /// startup, on its UI thread if it has one, after the UI framework has installed its SynchronizationContext there: the
+    /// thread's dispatcher then marshals through that loop, even if it was first used before the loop existed.
+    /// Windows, styles and the WPF lifetime (Run/Shutdown) do not exist.
     /// </summary>
     public class Application : DispatcherObject {
         private static readonly object instanceLock = new object();
@@ -34,6 +37,7 @@ namespace System.Windows {
                 }
                 current = this;
             }
+            Dispatcher.AdoptLoop(SynchronizationContext.Current);
         }
 
         public static Application Current => current;

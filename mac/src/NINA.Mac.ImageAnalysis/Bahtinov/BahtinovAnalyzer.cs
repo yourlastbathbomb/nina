@@ -66,7 +66,10 @@ namespace NINA.Mac.ImageAnalysis {
         /// <summary>"NINA" for the faithful port, "Robust" for <see cref="BahtinovAnalyzer.AnalyzeRobust"/>.</summary>
         public string Algorithm { get; internal set; } = "NINA";
 
-        /// <summary>True when six Hough lines were found and both intersections exist (upstream draws the overlay).</summary>
+        /// <summary>
+        /// True when six Hough lines were found and both intersections exist (upstream draws the overlay).
+        /// <see cref="BahtinovAnalyzer.AnalyzeRobust"/> also requires each spike's two edges to be parallel.
+        /// </summary>
         public bool Success { get; internal set; }
 
         /// <summary>

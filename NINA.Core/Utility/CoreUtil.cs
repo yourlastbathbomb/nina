@@ -28,7 +28,8 @@ using System.Threading.Tasks;
 namespace NINA.Core.Utility {
 
     public static class CoreUtil {
-        public static char[] PATHSEPARATORS = new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
+        // Both separators on every OS: file patterns use '\' (on Windows this equals DirectorySeparatorChar + AltDirectorySeparatorChar)
+        public static char[] PATHSEPARATORS = new char[] { '\\', '/' };
         public static string APPLICATIONDIRECTORY = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         public static string APPLICATIONTEMPPATH = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NINA");
         public static DateTime ApplicationStartDate = DateTime.Now;
@@ -244,7 +245,17 @@ namespace NINA.Core.Utility {
         /// <param name="str"></param>
         /// <returns></returns>
         public static string ReplaceInvalidFilenameChars(string str) {
-            return string.Join("_", str.Split(Path.GetInvalidFileNameChars()));
+            return string.Join("_", str.Split(OperatingSystem.IsWindows() ? Path.GetInvalidFileNameChars() : PortableInvalidFileNameChars));
+        }
+
+        // Windows' set (control characters, " < > | : * ? \ /), used on other OSes too so file names stay valid when copied to Windows or exFAT
+        private static readonly char[] PortableInvalidFileNameChars = BuildPortableInvalidFileNameChars();
+
+        private static char[] BuildPortableInvalidFileNameChars() {
+            var chars = new List<char>();
+            for (var c = 0; c < 32; c++) { chars.Add((char)c); }
+            chars.AddRange("\"<>|:*?\\/");
+            return chars.ToArray();
         }
 
         /// <summary>

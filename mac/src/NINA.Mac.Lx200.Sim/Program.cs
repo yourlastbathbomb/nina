@@ -64,7 +64,7 @@ namespace NINA.Mac.Lx200.Sim {
             try {
                 options = new SimOptions().Apply(quirks);
             } catch (ArgumentException ex) {
-                Console.Error.WriteLine(ex.Message);
+                Console.Error.WriteLine($"{ex.Message} ('lx200sim quirks' lists the switches)");
                 return 2;
             }
 

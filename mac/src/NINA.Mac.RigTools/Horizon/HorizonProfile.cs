@@ -122,13 +122,7 @@ namespace NINA.Mac.RigTools.Horizon {
                 throw new ArgumentException("Horizon file does not contain enough entries or is invalid");
             }
             if (!horizonMap.ContainsKey(0) && !horizonMap.ContainsKey(360)) {
-                var nearest0Azimuth = horizonMap.Keys.OrderBy(x => Math.Abs(x)).First();
-                var nearest360Azimuth = horizonMap.Keys.OrderByDescending(x => Math.Abs(x)).First();
-
-                var key = nearest0Azimuth;
-                if (360 - nearest360Azimuth < nearest0Azimuth) {
-                    key = nearest360Azimuth;
-                }
+                var key = WrapSourceAzimuth(horizonMap.Keys);
 
                 horizonMap[0] = horizonMap[key];
                 horizonMap[360] = horizonMap[key];
@@ -137,6 +131,22 @@ namespace NINA.Mac.RigTools.Horizon {
             } else if (horizonMap.ContainsKey(0) && !horizonMap.ContainsKey(360)) {
                 horizonMap[360] = horizonMap[0];
             }
+        }
+
+        /// <summary>
+        /// The point whose altitude <see cref="Groom"/> copies to both 0 and 360 when the file has neither
+        /// (CustomHorizon.cs:58-68, verbatim logic): the point nearest to 0, unless the one nearest to 360 is strictly
+        /// closer to its end. The gap across north is therefore NOT interpolated; <see cref="HorizonFile"/> warns.
+        /// </summary>
+        internal static double WrapSourceAzimuth(IEnumerable<double> azimuths) {
+            var nearest0Azimuth = azimuths.OrderBy(x => Math.Abs(x)).First();
+            var nearest360Azimuth = azimuths.OrderByDescending(x => Math.Abs(x)).First();
+
+            var key = nearest0Azimuth;
+            if (360 - nearest360Azimuth < nearest0Azimuth) {
+                key = nearest360Azimuth;
+            }
+            return key;
         }
 
         /// <summary>

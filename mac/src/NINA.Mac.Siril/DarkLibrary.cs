@@ -132,7 +132,7 @@ namespace NINA.Mac.Siril {
                 throw new ArgumentException("Library root is required", nameof(root));
             }
             if (string.IsNullOrWhiteSpace(masterDarkFileTemplate) || !masterDarkFileTemplate.EndsWith(".fit", StringComparison.Ordinal)) {
-                throw new ArgumentException("The master-dark template must end in .fit (scripts pin Siril's extension with 'setext fit')", nameof(masterDarkFileTemplate));
+                throw new ArgumentException("The master-dark template must end in .fit (scripts pin Siril's extension with 'setext fit' and turn compression off)", nameof(masterDarkFileTemplate));
             }
             if (masterDarkFileTemplate.Contains('/') || masterDarkFileTemplate.Contains('\\')) {
                 throw new ArgumentException("The master-dark template is a file name, not a path", nameof(masterDarkFileTemplate));
@@ -272,7 +272,7 @@ namespace NINA.Mac.Siril {
             b.Comment($"Library: {Root}");
             b.Blank();
             b.Command("requires", SirilScriptGenerator.RequiredSirilVersion);
-            b.Command("setext", "fit");
+            SirilScriptGenerator.PinOutputFormat(b); // .fit names, 32-bit float masters, no .fz whatever the seeded preferences say
             foreach (var set in list) {
                 var process = Path.Combine(ProcessDirectory, set.Name);
                 b.Blank();

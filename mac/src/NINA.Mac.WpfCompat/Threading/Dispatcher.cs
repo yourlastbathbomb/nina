@@ -12,6 +12,7 @@
 
 #endregion "copyright"
 
+using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -23,24 +24,35 @@ namespace System.Windows.Threading {
     /// <summary>
     /// Stand-in for WPF's Dispatcher on hosts without a WPF message loop.
     /// A dispatcher belongs to the thread that created it (<see cref="CurrentDispatcher"/>), as in WPF.
-    /// If that thread had a SynchronizationContext at creation (a UI framework's main loop), work from other
-    /// threads is marshalled through it: Invoke uses Send and blocks, BeginInvoke uses Post.
-    /// Without one there is no loop to marshal to: Invoke and BeginInvoke run the callback inline on the calling thread,
-    /// holding the dispatcher's lock, so work items still never overlap (as on WPF's single dispatcher thread).
-    /// Priorities are validated and recorded but do not reorder work.
+    /// If that thread has a SynchronizationContext (a UI framework's main loop), work from other threads is marshalled
+    /// through it: Invoke uses Send and blocks, BeginInvoke uses Post. The loop is taken from the thread when the dispatcher
+    /// is created, or when an <see cref="Application"/> is created on that thread later (UI frameworks often install their
+    /// context after the first dispatcher use).
+    /// Without a loop, work items run one at a time and never overlap, as on WPF's single dispatcher thread:
+    /// <list type="bullet">
+    /// <item>When the dispatcher is idle, Invoke and BeginInvoke run the callback inline on the calling thread.</item>
+    /// <item>While a work item runs, Invoke from another thread waits for it and then runs (Send priority goes first);
+    /// Invoke from inside a work item runs inline, as WPF's Invoke does on its own thread.</item>
+    /// <item>While a work item runs, or other items are queued, BeginInvoke queues and returns a Pending operation. Queued
+    /// items run in order on a thread-pool thread once the current item finishes, so BeginInvoke never blocks.</item>
+    /// </list>
+    /// Priorities are validated and recorded but do not reorder queued work.
     /// </summary>
     public sealed class Dispatcher {
 
         [ThreadStatic]
         private static Dispatcher currentDispatcher;
 
-        private readonly SynchronizationContext loop;
         private readonly object gate = new object();
+        private readonly Queue<DispatcherOperation> pending = new Queue<DispatcherOperation>();
+        private volatile SynchronizationContext loop;
+        // Without a loop: the thread running a work item now, and whether a thread-pool drain of 'pending' is scheduled
+        private Thread executing;
+        private bool draining;
 
         private Dispatcher() {
             Thread = Thread.CurrentThread;
-            var context = SynchronizationContext.Current;
-            loop = context is DispatcherSynchronizationContext ? null : context;
+            loop = LoopOf(SynchronizationContext.Current);
         }
 
         /// <summary>The dispatcher of the calling thread, created on first use (WPF semantics).</summary>
@@ -74,12 +86,35 @@ namespace System.Windows.Threading {
             return BeginInvokeCore(priority, method, null);
         }
 
+        private static SynchronizationContext LoopOf(SynchronizationContext context) {
+            return context is DispatcherSynchronizationContext ? null : context;
+        }
+
+        /// <summary>
+        /// Called on the owning thread by <see cref="Application"/>'s constructor: if this dispatcher was created before the UI
+        /// framework installed its SynchronizationContext, it marshals through that loop from now on.
+        /// </summary>
+        internal void AdoptLoop(SynchronizationContext context) {
+            var candidate = LoopOf(context);
+            if (candidate != null && CheckAccess()) {
+                lock (gate) {
+                    loop ??= candidate;
+                }
+            }
+        }
+
         internal object InvokeCore(DispatcherPriority priority, Delegate method, object[] args) {
             ArgumentNullException.ThrowIfNull(method);
             ValidatePriority(priority);
-            if (loop == null) {
-                lock (gate) {
+            var context = loop;
+            if (context == null) {
+                if (!Enter()) {
                     return Execute(method, args);
+                }
+                try {
+                    return Execute(method, args);
+                } finally {
+                    Exit();
                 }
             }
             if (CheckAccess()) {
@@ -88,7 +123,7 @@ namespace System.Windows.Threading {
 
             object result = null;
             ExceptionDispatchInfo error = null;
-            loop.Send(_ => {
+            context.Send(_ => {
                 try {
                     result = Execute(method, args);
                 } catch (Exception ex) {
@@ -103,14 +138,80 @@ namespace System.Windows.Threading {
             ArgumentNullException.ThrowIfNull(method);
             ValidatePriority(priority);
             var operation = new DispatcherOperation(this, priority, method, args);
-            if (loop == null) {
-                lock (gate) {
-                    operation.Run();
+            var context = loop;
+            if (context != null) {
+                context.Post(_ => operation.Run(), null);
+                return operation;
+            }
+            lock (gate) {
+                if (executing != null || draining || pending.Count > 0) {
+                    pending.Enqueue(operation);
+                    return operation;
                 }
-            } else {
-                loop.Post(_ => operation.Run(), null);
+                executing = Thread.CurrentThread;
+            }
+            try {
+                operation.Run();
+            } finally {
+                Exit();
             }
             return operation;
+        }
+
+        /// <summary>Takes the right to run a work item; false if the calling thread already holds it (a nested call).</summary>
+        private bool Enter() {
+            var me = Thread.CurrentThread;
+            lock (gate) {
+                if (executing == me) {
+                    return false;
+                }
+                while (executing != null) {
+                    Monitor.Wait(gate);
+                }
+                executing = me;
+                return true;
+            }
+        }
+
+        private void Exit() {
+            lock (gate) {
+                executing = null;
+                if (pending.Count > 0 && !draining) {
+                    draining = true;
+                    ThreadPool.UnsafeQueueUserWorkItem(_ => Drain(), null);
+                }
+                Monitor.PulseAll(gate);
+            }
+        }
+
+        private void Drain() {
+            while (true) {
+                DispatcherOperation next;
+                lock (gate) {
+                    while (executing != null) {
+                        Monitor.Wait(gate);
+                    }
+                    if (pending.Count > 0 && loop != null) {
+                        // A loop was adopted meanwhile: it runs the rest, in order
+                        var context = loop;
+                        foreach (var operation in pending) {
+                            context.Post(_ => operation.Run(), null);
+                        }
+                        pending.Clear();
+                    }
+                    if (pending.Count == 0) {
+                        draining = false;
+                        return;
+                    }
+                    next = pending.Dequeue();
+                    executing = Thread.CurrentThread;
+                }
+                next.Run();
+                lock (gate) {
+                    executing = null;
+                    Monitor.PulseAll(gate);
+                }
+            }
         }
 
         internal static object Execute(Delegate method, object[] args) {
@@ -162,7 +263,10 @@ namespace System.Windows.Threading {
 
         public DispatcherPriority Priority { get; }
 
-        public DispatcherOperationStatus Status { get; private set; } = DispatcherOperationStatus.Pending;
+        // Read from other threads (e.g. CommandManager coalescing) while a queued operation completes elsewhere
+        private volatile DispatcherOperationStatus status = DispatcherOperationStatus.Pending;
+
+        public DispatcherOperationStatus Status => status;
 
         public Task Task => completion.Task;
 
@@ -171,13 +275,13 @@ namespace System.Windows.Threading {
         }
 
         internal void Run() {
-            Status = DispatcherOperationStatus.Executing;
+            status = DispatcherOperationStatus.Executing;
             try {
                 var result = Dispatcher.Execute(method, args);
-                Status = DispatcherOperationStatus.Completed;
+                status = DispatcherOperationStatus.Completed;
                 completion.SetResult(result);
             } catch (Exception ex) {
-                Status = DispatcherOperationStatus.Completed;
+                status = DispatcherOperationStatus.Completed;
                 completion.SetException(ex);
             }
         }

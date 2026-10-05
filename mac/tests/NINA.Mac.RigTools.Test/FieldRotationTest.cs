@@ -76,15 +76,16 @@ namespace NINA.Mac.RigTools.Test {
             }
         }
 
-        [TestCase(40.0, 180.0, 10.3)]
-        [TestCase(20.0, 180.0, 13.0)]
-        [TestCase(60.0, 150.0, 7.8)]
-        [TestCase(75.0, 120.0, 7.0)]
-        [TestCase(85.0, 180.0, 1.2)]
-        public void MaxSub_MatchesResearchAltAzGrid(double alt, double az, double expectedSeconds) {
-            // research/rig_investigate_solve.md table 4 ("Alt 40/Az 180 10.3 s" re-verified in rig_verify_solve.md).
-            // Table 4 prints whole seconds above 10 s, so allow half of that digit there.
-            var tolerance = expectedSeconds >= 10 ? WholeSecondTolerance : SecondsTolerance;
+        // Each case carries the tolerance of its source: half the last printed digit.
+        // 10.3 s: rig_verify_solve.md:96 ("Alt 40/Az 180 10.3 s", tenths; table 4 prints the same cell as "10").
+        // 13 s: research/rig_investigate_solve.md table 4, which prints whole seconds above 10 s.
+        // The rest: table 4 cells printed to 0.1 s.
+        [TestCase(40.0, 180.0, 10.3, SecondsTolerance)]
+        [TestCase(20.0, 180.0, 13.0, WholeSecondTolerance)]
+        [TestCase(60.0, 150.0, 7.8, SecondsTolerance)]
+        [TestCase(75.0, 120.0, 7.0, SecondsTolerance)]
+        [TestCase(85.0, 180.0, 1.2, SecondsTolerance)]
+        public void MaxSub_MatchesResearchAltAzGrid(double alt, double az, double expectedSeconds, double tolerance) {
             FieldRotation.MaxSubSeconds(Lat, alt, az, ImagingTrain.Asi585Native(2)).Should().BeApproximately(expectedSeconds, tolerance);
             // Symmetric about the meridian.
             FieldRotation.MaxSubSeconds(Lat, alt, 360 - az, ImagingTrain.Asi585Native(2)).Should().BeApproximately(expectedSeconds, tolerance);

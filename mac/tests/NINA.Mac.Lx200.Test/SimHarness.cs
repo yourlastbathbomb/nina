@@ -15,6 +15,7 @@
 using NINA.Mac.Lx200;
 using NINA.Mac.Lx200.Sim;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 
@@ -23,10 +24,20 @@ namespace NINA.Mac.Lx200.Test {
     /// <summary>An in-process simulator wired to a connection through an in-memory pipe.</summary>
     internal sealed class SimHarness : IDisposable {
 
-        public SimHarness(SimOptions simOptions = null, Lx200ConnectionOptions linkOptions = null) {
+        /// <param name="clockUtc">
+        /// When set, the simulator's clock and the probe's clock (the trace) both start at this UTC time and run on in
+        /// real time, so a test can pin the time of day.
+        /// </param>
+        public SimHarness(SimOptions simOptions = null, Lx200ConnectionOptions linkOptions = null, DateTime? clockUtc = null) {
             var (client, server) = DuplexPipe.Create();
-            Sim = new AutostarSimulator(server, simOptions ?? new SimOptions { PlanetaryUpdateSeconds = 0.2, SlewSeconds = 0.5 });
-            Trace = new Lx200Trace();
+            simOptions ??= new SimOptions { PlanetaryUpdateSeconds = 0.2, SlewSeconds = 0.5 };
+            if (clockUtc.HasValue) {
+                var start = clockUtc.Value;
+                var elapsed = Stopwatch.StartNew();
+                simOptions.UtcNow = () => start + elapsed.Elapsed;
+            }
+            Sim = new AutostarSimulator(server, simOptions);
+            Trace = new Lx200Trace(startUtc: clockUtc);
             Link = Lx200Connection.OverStream(client, "test-sim", Trace, linkOptions ?? new Lx200ConnectionOptions { MinimumGap = TimeSpan.FromMilliseconds(5) });
         }
 

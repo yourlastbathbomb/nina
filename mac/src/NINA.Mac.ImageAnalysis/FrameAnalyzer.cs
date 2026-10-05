@@ -24,8 +24,15 @@ namespace NINA.Mac.ImageAnalysis {
     /// defaults: NINA.Profile/ImageSettings.cs:34-42 and FocuserSettings.cs:43-45.
     /// </summary>
     public sealed class FrameAnalysisOptions {
-        public double AutoStretchFactor { get; set; } = AutoStretch.DefaultFactor;
-        public double BlackClipping { get; set; } = AutoStretch.DefaultBlackClipping;
+        /// <summary>
+        /// The image panel's auto-stretch toggle (ImageSettings.AutoStretch, profile default true). As upstream
+        /// (ImageControlVM.cs:668), the stretch is forced on whenever <see cref="DetectStars"/> is set; with both off,
+        /// the display image and the Bahtinov input are the linear data.
+        /// </summary>
+        public bool AutoStretch { get; set; } = true;
+
+        public double AutoStretchFactor { get; set; } = NINA.Mac.ImageAnalysis.AutoStretch.DefaultFactor;
+        public double BlackClipping { get; set; } = NINA.Mac.ImageAnalysis.AutoStretch.DefaultBlackClipping;
         public bool DebayerImage { get; set; } = true;
         public bool DebayeredHFR { get; set; } = true;
         public bool UnlinkedStretch { get; set; } = true;
@@ -73,11 +80,24 @@ namespace NINA.Mac.ImageAnalysis {
         /// <summary>Null when star detection was off.</summary>
         public StarDetectionResult Stars { get; internal set; }
 
-        /// <summary>The stretched display image star detection looked at: Gray16 (mono) or null when Rgb48 is set.</summary>
-        public ushort[] Stretched16 { get; internal set; }
+        /// <summary>
+        /// True when the display image was auto-stretched: always when stars were detected, otherwise when
+        /// <see cref="FrameAnalysisOptions.AutoStretch"/> is set (ImageControlVM.cs:668).
+        /// </summary>
+        public bool IsStretched { get; internal set; }
 
-        /// <summary>The stretched debayered display image (R, G, B order), or null for mono.</summary>
-        public ushort[] StretchedRgb48 { get; internal set; }
+        /// <summary>
+        /// Upstream's displayed image (ImageControlVM.Image) as Gray16, or null when <see cref="DisplayRgb48"/> is set.
+        /// Star detection runs on it. Stretched when <see cref="IsStretched"/> is true; otherwise it is the raw frame
+        /// data itself (not a copy), as upstream's unstretched bitmap is.
+        /// </summary>
+        public ushort[] Display16 { get; internal set; }
+
+        /// <summary>
+        /// The debayered display image (R, G, B order), or null for mono. Stretched when <see cref="IsStretched"/> is
+        /// true, otherwise the linear debayered data.
+        /// </summary>
+        public ushort[] DisplayRgb48 { get; internal set; }
 
         public int Width { get; internal set; }
         public int Height { get; internal set; }
@@ -87,19 +107,22 @@ namespace NINA.Mac.ImageAnalysis {
         public TimeSpan DetectionTime { get; internal set; }
         public TimeSpan TotalTime { get; internal set; }
 
-        /// <summary>The 8 bit view of the stretched image (what the Bahtinov analyser and upstream's display use).</summary>
+        /// <summary>
+        /// The 8 bit view of the display image, as BahtinovAnalysis.cs:41-51 converts it: Gray16 by the top byte, Rgb48
+        /// through Grayscale(0.2125, 0.7154, 0.0721) on the GDI+ view first.
+        /// </summary>
         public Gray8Image GetDisplayGray8() {
-            var gray16 = StretchedRgb48 != null
-                ? PixelConversions.Grayscale48To16(StretchedRgb48, Width, Height, 0.2125, 0.7154, 0.0721)
-                : Stretched16;
+            var gray16 = DisplayRgb48 != null
+                ? PixelConversions.Grayscale48To16(DisplayRgb48, Width, Height, 0.2125, 0.7154, 0.0721)
+                : Display16;
             return PixelConversions.Convert16To8(gray16, Width, Height);
         }
     }
 
     /// <summary>
     /// Replays N.I.N.A.'s image preparation for one frame: ImageControlVM.PrepareImage (ImageControlVM.cs:604-631:
-    /// render, debayer when bayered and enabled), ProcessImage (:663-689: auto stretch, forced on when stars are
-    /// detected; then RenderedImage.DetectStars) and the statistics NINA computes for every frame
+    /// render, debayer when bayered and enabled), ProcessImage (:663-689: auto stretch when enabled, forced on when
+    /// stars are detected; then RenderedImage.DetectStars) and the statistics NINA computes for every frame
     /// (BaseImageData.Statistics). Pure managed code, safe to call from any thread.
     /// </summary>
     public static class FrameAnalyzer {
@@ -115,6 +138,9 @@ namespace NINA.Mac.ImageAnalysis {
             analysis.StatisticsTime = sw.Elapsed;
 
             sw.Restart();
+            // ImageControlVM.cs:667-677: stretch when detecting stars or when the auto-stretch toggle is on
+            bool stretch = options.DetectStars || options.AutoStretch;
+            analysis.IsStretched = stretch;
             ushort[] measurement = frame.Data;
             if (frame.IsBayered && options.DebayerImage) {
                 // ImageControlVM.cs:605-631: saveColorChannels = unlinked stretch, saveLumChannel = debayered HFR && detect
@@ -126,19 +152,25 @@ namespace NINA.Mac.ImageAnalysis {
                 }
 
                 // ImageControlVM.cs:672 / DebayeredImage.Stretch: unlinked only when the colour channels were kept
-                if (options.UnlinkedStretch && debayered.Red != null) {
+                if (!stretch) {
+                    // the debayered bitmap is displayed as is
+                    analysis.DisplayRgb48 = debayered.Rgb;
+                } else if (options.UnlinkedStretch && debayered.Red != null) {
                     var mapR = AutoStretch.GetStretchMap(ImageStatistics.Create(debayered.Red, frame.BitDepth), options.AutoStretchFactor, options.BlackClipping);
                     var mapG = AutoStretch.GetStretchMap(ImageStatistics.Create(debayered.Green, frame.BitDepth), options.AutoStretchFactor, options.BlackClipping);
                     var mapB = AutoStretch.GetStretchMap(ImageStatistics.Create(debayered.Blue, frame.BitDepth), options.AutoStretchFactor, options.BlackClipping);
-                    analysis.StretchedRgb48 = AutoStretch.ApplyRgb(debayered.Rgb, mapR, mapG, mapB);
+                    analysis.DisplayRgb48 = AutoStretch.ApplyRgb(debayered.Rgb, mapR, mapG, mapB);
                 } else {
                     // linked: one map from the raw (mosaic) statistics for all channels (ImageUtility.Stretch)
                     var map = AutoStretch.GetStretchMap(statistics, options.AutoStretchFactor, options.BlackClipping);
-                    analysis.StretchedRgb48 = AutoStretch.ApplyRgb(debayered.Rgb, map, map, map);
+                    analysis.DisplayRgb48 = AutoStretch.ApplyRgb(debayered.Rgb, map, map, map);
                 }
+            } else if (!stretch) {
+                // RenderBitmapSource (BaseImageData.cs:83-85) wraps the raw array
+                analysis.Display16 = frame.Data;
             } else {
                 var map = AutoStretch.GetStretchMap(statistics, options.AutoStretchFactor, options.BlackClipping);
-                analysis.Stretched16 = AutoStretch.Apply(frame.Data, map);
+                analysis.Display16 = AutoStretch.Apply(frame.Data, map);
             }
             analysis.RenderTime = sw.Elapsed;
 
@@ -147,8 +179,8 @@ namespace NINA.Mac.ImageAnalysis {
                 var input = new StarDetectionInput {
                     Width = frame.Width,
                     Height = frame.Height,
-                    DetectionImage16 = analysis.Stretched16,
-                    DetectionImageRgb48 = analysis.StretchedRgb48,
+                    DetectionImage16 = analysis.Display16,
+                    DetectionImageRgb48 = analysis.DisplayRgb48,
                     MeasurementData = measurement,
                     PixelSizeMicrons = options.PixelSizeMicrons,
                     FocalLengthMm = options.FocalLengthMm
@@ -161,8 +193,9 @@ namespace NINA.Mac.ImageAnalysis {
         }
 
         /// <summary>
-        /// The Bahtinov analyser as N.I.N.A. runs it: on a crop (default 200 x 200 in ImageControlVM) of the stretched
-        /// display image. <paramref name="analysis"/> must come from <see cref="Analyze"/> on the same frame.
+        /// The Bahtinov analyser as N.I.N.A. runs it (ImageControlVM.cs:278-282): on a crop (default 200 x 200) of the
+        /// display image, stretched or linear depending on <see cref="FrameAnalysis.IsStretched"/>.
+        /// <paramref name="analysis"/> must come from <see cref="Analyze"/> on the same frame.
         /// </summary>
         /// <param name="robust">False (default) runs the faithful N.I.N.A. analyser; true runs <see cref="BahtinovAnalyzer.AnalyzeRobust"/>.</param>
         public static BahtinovResult AnalyzeBahtinov(FrameAnalysis analysis, PixelRect crop, BahtinovResult previous = null, bool robust = false) {

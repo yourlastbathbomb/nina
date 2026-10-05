@@ -1,23 +1,29 @@
 #!/bin/bash
 # Copyright © 2016 - 2026 Stefan Berg and the N.I.N.A. contributors. MPL-2.0: http://mozilla.org/MPL/2.0/
 #
-# Build the macOS app bundle: self-contained osx-arm64 publish -> "<AppDisplayName>.app" in mac/artifacts/,
-# vendor dylibs in Contents/Frameworks, data in Contents/Resources, ad-hoc signed inside-out, then verified
-# without spctl (an ad-hoc build is never Gatekeeper-approved) and smoke-tested from CWD "/".
+# Build the macOS app bundle: self-contained osx-arm64 publish -> "<AppDisplayName>.app" (Nightglass.app) in
+# mac/artifacts/, vendor dylibs in Contents/Frameworks, data in Contents/Resources, ad-hoc signed inside-out, then
+# verified without spctl (an ad-hoc build is never Gatekeeper-approved) and smoke-tested from CWD "/": headlessly
+# (--smoke-test), then for real (--gui-smoke: the main window shows for a few seconds and the app quits by itself).
 #
-#   mac/packaging/package-app.sh [--skip-smoke] [--zip]
+#   mac/packaging/package-app.sh [--skip-smoke] [--skip-gui-smoke] [--zip]
+#
+#   --skip-gui-smoke  skip only the on-screen check (no GUI session, display asleep, or nobody should see a window)
+#   --skip-smoke      skip both smoke tests
 #
 # Needs: the user-local .NET 10 SDK (mac/dotnet), Xcode command line tools (codesign, install_name_tool, otool,
 # lipo, sips, iconutil, plutil, python3). Reads mac/native/stage and mac/native/ephemeris; never writes there.
 set -euo pipefail
 
 skip_smoke=0
+skip_gui_smoke=0
 make_zip=0
 for arg in "$@"; do
     case "$arg" in
-        --skip-smoke) skip_smoke=1 ;;
+        --skip-smoke) skip_smoke=1; skip_gui_smoke=1 ;;
+        --skip-gui-smoke) skip_gui_smoke=1 ;;
         --zip) make_zip=1 ;;
-        *) echo "usage: $0 [--skip-smoke] [--zip]" >&2; exit 2 ;;
+        *) echo "usage: $0 [--skip-smoke] [--skip-gui-smoke] [--zip]" >&2; exit 2 ;;
     esac
 done
 
@@ -53,7 +59,11 @@ version="$(prop Version)"
 min_os="$(prop AppMinimumSystemVersion)"
 nina_base="$(prop NinaBaseVersion)"
 echo "  $display ($short) $version, $bundle_id, macOS >= $min_os, based on N.I.N.A. $nina_base"
-[[ "$(echo "$display" | tr -d . | tr '[:lower:]' '[:upper:]')" != *NINA* ]] || fail "display name must not contain NINA"
+# Same rule as CheckAppIdentity in the csproj and AppInfo.ContainsNina: letters only, any case
+for name in "$display" "$short" "$exe" "$bundle_id"; do
+    [[ "$(printf '%s' "$name" | LC_ALL=C tr -cd 'A-Za-z' | tr '[:lower:]' '[:upper:]')" != *NINA* ]] ||
+        fail "'$name' contains NINA (spaces and punctuation ignored); the fork needs its own name"
+done
 
 step "Publish (Release, osx-arm64, self-contained)"
 publish="$artifacts/publish/osx-arm64"
@@ -125,26 +135,19 @@ else
     echo "  WARNING: $ephemeris missing; JPLEPH not bundled"
 fi
 cp "$nina/LICENSE.txt" "$contents/Resources/LICENSE.txt"
+# Every vendor dylib in Frameworks (and JPLEPH) needs an entry in bundle_tools.py NATIVE_LICENSES: it copies the
+# licence into Resources/licenses and writes the notice (SOFA clause 3(a) statement, NOVAS/JPL acknowledgements,
+# libusb version and copyright holders). An unknown dylib stops the build instead of shipping without a notice.
+native_notices="$(python3 "$tools" native-licenses "$contents/Frameworks" "$stage" "$nina" "$contents/Resources")" ||
+    fail "licence notices for the vendor libraries (see above)"
 extra_notices=()
-if [[ -f "$stage/ZWO-LICENSE.txt" ]]; then
-    cp "$stage/ZWO-LICENSE.txt" "$contents/Resources/licenses/ZWO-ASI-SDK-LICENSE.txt"
-    extra_notices+=("ZWO ASI Camera SDK (libASICamera2.dylib), MIT-style=$stage/ZWO-LICENSE.txt")
-fi
-if [[ -f "$contents/Frameworks/libusb-1.0.0.dylib" ]]; then
-    libusb_copying="$(brew --prefix libusb 2>/dev/null || true)/COPYING"
-    if [[ -f "$libusb_copying" ]]; then
-        cp "$libusb_copying" "$contents/Resources/licenses/libusb-LGPL-2.1.txt"
-        cat > "$contents/Resources/licenses/libusb-NOTICE.txt" <<EOF
-libusb-1.0.0.dylib (Contents/Frameworks) is libusb, licensed under the GNU Lesser General Public License v2.1
-(libusb-LGPL-2.1.txt). It is dynamically linked and unmodified apart from its install name; you may replace it with
-your own build of libusb 1.0 (same file name) and re-sign the bundle. Source: https://github.com/libusb/libusb
-EOF
-        extra_notices+=("libusb 1.0 (libusb-1.0.0.dylib), LGPL-2.1, dynamically linked=$contents/Resources/licenses/libusb-NOTICE.txt")
-    else
-        fail "libusb is bundled but its licence (Homebrew libusb COPYING) was not found"
+while IFS= read -r line; do
+    if [[ -n "$line" ]]; then
+        extra_notices+=("$line")
+        echo "  licence: ${line%%=*}"
     fi
-fi
-python3 "$tools" notices "$publish/NINA.Mac.App.deps.json" "$nuget" "$contents/Resources/THIRD-PARTY-NOTICES.txt" "${extra_notices[@]}" \
+done <<< "$native_notices"
+python3 "$tools" notices "$publish/NINA.Mac.App.deps.json" "$nuget" "$contents/Resources/THIRD-PARTY-NOTICES.txt" ${extra_notices[@]+"${extra_notices[@]}"} \
     | sed 's/^/  notices: /'
 python3 "$tools" icon "$contents/Resources/AppIcon.icns"
 
@@ -175,19 +178,11 @@ step "Ad-hoc sign, inside-out"
 # runtimeconfig.json next to the apphost (it finds them relative to the executable). So every file there is signed
 # individually, as Avalonia's macOS deployment guide does; non-Mach-O files carry the signature in extended
 # attributes (copy the bundle with ditto or cp -p, not tools that drop xattrs).
-signed_macho=0
-signed_other=0
-while IFS= read -r -d '' f; do
-    [[ "$f" == "$main" ]] && continue
-    codesign --force --sign - --timestamp=none "$f" 2>/dev/null || fail "codesign $f"
-    if file -b "$f" | grep -q 'Mach-O'; then
-        signed_macho=$((signed_macho + 1))
-    else
-        signed_other=$((signed_other + 1))
-    fi
-done < <(find "$contents/Frameworks" "$contents/MacOS" -type f -print0)
+# Entitlements a file already has are kept: the runtime's createdump needs com.apple.security.cs.debugger to write
+# crash dumps (a plain re-sign drops it and createdump fails in task_for_pid).
+signed="$(python3 "$tools" sign --skip "$main" "$contents/Frameworks" "$contents/MacOS")" || fail "signing nested code"
 codesign --force --sign - --timestamp=none --identifier "$bundle_id" "$app" 2>/dev/null || fail "codesign the bundle"
-echo "  $signed_macho Mach-O + $signed_other other files in MacOS/Frameworks, then the bundle (identifier $bundle_id)"
+echo "  $signed in MacOS/Frameworks, then the bundle (identifier $bundle_id)"
 
 step "Verify (no spctl: Gatekeeper never approves ad-hoc builds)"
 verify_out="$(codesign --verify --deep --strict --verbose=2 "$app" 2>&1)" || { echo "$verify_out"; fail "codesign --verify --deep --strict"; }
@@ -220,8 +215,19 @@ done < <(find "$contents" -type f -print0)
 for required in Info.plist MacOS/"$exe" Resources/LICENSE.txt Resources/THIRD-PARTY-NOTICES.txt Resources/AppIcon.icns; do
     [[ -e "$contents/$required" ]] || { echo "  MISSING $required"; problems=$((problems + 1)); }
 done
+# A notice for every vendor dylib and for JPLEPH
+for lib in "$contents/Frameworks"/*.dylib; do
+    [[ -e "$lib" ]] || continue
+    grep -qF "($(basename "$lib"))" "$contents/Resources/THIRD-PARTY-NOTICES.txt" ||
+        { echo "  NO NOTICE for Frameworks/$(basename "$lib")"; problems=$((problems + 1)); }
+done
+if [[ -f "$contents/Resources/JPLEPH" ]]; then
+    grep -qF "(Resources/JPLEPH)" "$contents/Resources/THIRD-PARTY-NOTICES.txt" || { echo "  NO NOTICE for JPLEPH"; problems=$((problems + 1)); }
+fi
+# Entitlements of the published Mach-O files (createdump) survived signing
+entitlements="$(python3 "$tools" check-entitlements "$publish" "$contents/MacOS")" || { echo "$entitlements" | sed 's/^/  /'; problems=$((problems + 1)); }
 [[ $problems -eq 0 ]] || fail "$problems bundle problem(s)"
-echo "  all Mach-O arm64 and signed; dependencies resolve inside the bundle; Info.plist valid"
+echo "  all Mach-O arm64 and signed; dependencies resolve inside the bundle; Info.plist valid; notices complete; ${entitlements:-entitlements checked}"
 echo "  spctl (informational): $(spctl --assess --type execute "$app" 2>&1 || true)"
 
 if [[ $skip_smoke -eq 0 ]]; then
@@ -236,12 +242,35 @@ if [[ $skip_smoke -eq 0 ]]; then
     python3 -c "import sys; print(f'  smoke test wall time (process start to exit): {(float(sys.argv[2]) - float(sys.argv[1])) * 1000:.0f} ms')" "$start" "$end"
 fi
 
+if [[ $skip_gui_smoke -eq 0 ]]; then
+    # The headless smoke test cannot show that a real launch works (Avalonia.Headless brings its own text shaper, and
+    # with the display asleep the native platform cannot start). This is a real launch: Avalonia.Native, the real App
+    # and services, the main window on screen (without taking focus) for a few seconds, every page rendered, then the
+    # app quits by itself. It needs a logged-in GUI session with the display awake. perl's alarm is a backstop for the
+    # app's own 45 s watchdog.
+    step "GUI smoke test: \"$main\" --gui-smoke (CWD /; the main window shows for a few seconds)"
+    set +e
+    (cd / && /usr/bin/perl -e 'alarm 90; exec {$ARGV[0]} @ARGV or die "exec: $!"' "$main" --gui-smoke) | sed 's/^/  /'
+    status=${PIPESTATUS[0]}
+    set -e
+    [[ $status -eq 0 ]] || fail "GUI smoke test exited $status (it needs a logged-in session with the display awake; --skip-gui-smoke skips it)"
+fi
+
 if [[ $make_zip -eq 1 ]]; then
     step "Zip"
     zip="$artifacts/$short-$version-arm64.zip"
     rm -f "$zip"
-    ditto -c -k --keepParent "$app" "$zip"
-    echo "  $zip ($(du -h "$zip" | cut -f1))"
+    # --sequesterRsrc stores extended attributes (which hold the managed files' signatures) under __MACOSX/ instead
+    # of as "._" files next to them, so even a plain unzip leaves no AppleDouble files inside the bundle. Only Finder
+    # or ditto -x -k restore those attributes, and with them a valid signature.
+    ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
+    stray="$(unzip -Z1 "$zip" | grep -v '^__MACOSX/' | grep -E '(^|/)\._' || true)"
+    [[ -z "$stray" ]] || { echo "$stray" | head -5; fail "AppleDouble entries inside the bundle in $zip"; }
+    unzipped="$(mktemp -d)"
+    ditto -x -k "$zip" "$unzipped"
+    codesign --verify --deep --strict "$unzipped/$display.app" 2>&1 || { rm -rf "$unzipped"; fail "the zip does not extract (ditto -x -k) to a validly signed app"; }
+    rm -rf "$unzipped"
+    echo "  $zip ($(du -h "$zip" | cut -f1)); no AppleDouble files in the bundle; ditto -x -k extraction verifies"
 fi
 
 step "Done"

@@ -12,18 +12,15 @@
 
 #endregion "copyright"
 
-using System;
-
 namespace NINA.Core.Utility {
 
     /// <summary>
-    /// Probe-only stand-in so the upstream ASICameraDll.cs compiles without NINA.Core.
-    /// The real class arrives with the NINA.Core build in M3. Upstream only calls it on Windows.
+    /// Probe-only stand-in so the upstream ASICameraDll.cs compiles without NINA.Core. Its static constructor calls
+    /// LoadDll; like the real DllLoader off Windows, this does nothing: NativeLibraries resolves ASICamera2.dll instead.
     /// </summary>
     internal static class DllLoader {
 
         public static void LoadDll(string dllSubPath) {
-            throw new PlatformNotSupportedException($"DllLoader.LoadDll({dllSubPath}) is Windows-only");
         }
     }
 }

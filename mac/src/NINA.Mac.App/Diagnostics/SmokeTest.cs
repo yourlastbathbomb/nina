@@ -32,8 +32,9 @@ namespace NINA.Mac.App {
 
     /// <summary>
     /// <c>--smoke-test [--screenshots DIR]</c>: initialise the real platform services and the whole UI headlessly,
-    /// run a simulated night through the view-models, print one line per check and exit 0 only if all pass.
-    /// Nothing is shown on screen. Used on the packaged .app binary by mac/packaging/package-app.sh.
+    /// run a simulated night through the view-models, print one line per check and exit 0 only if all pass. It also
+    /// runs <c>--startup-check</c> in a child process to cover the real Avalonia.Native setup. Nothing is shown on
+    /// screen. Used on the packaged .app binary by mac/packaging/package-app.sh.
     /// </summary>
     public static class SmokeTest {
 
@@ -58,10 +59,26 @@ namespace NINA.Mac.App {
             output.WriteLine($"{info.DisplayName} {info.Version} smoke test (pid {Environment.ProcessId}, cwd '{Environment.CurrentDirectory}')");
 
             Check("identity", () => {
-                if (info.DisplayName.Replace(".", "").Contains("NINA", StringComparison.OrdinalIgnoreCase)) {
-                    throw new InvalidOperationException($"Display name '{info.DisplayName}' contains NINA");
+                var names = new List<(string What, string Value)> {
+                    ("display name", info.DisplayName),
+                    ("short name", info.ShortName),
+                    ("bundle id", info.BundleId),
+                };
+                var inBundle = ResourcePaths.Current.IsAppBundle && OperatingSystem.IsMacOS();
+                if (inBundle) {
+                    // What the Dock, menu bar and Finder show comes from the packaged Info.plist and executable name
+                    names.Add(("executable", Path.GetFileName(Environment.ProcessPath)));
+                    foreach (var key in new[] { "CFBundleName", "CFBundleDisplayName", "CFBundleExecutable", "CFBundleIdentifier" }) {
+                        names.Add(($"Info.plist {key}", MacBundle.MainBundleInfoString(key)
+                            ?? throw new InvalidOperationException($"Info.plist has no string {key}")));
+                    }
                 }
-                return $"'{info.DisplayName}', short '{info.ShortName}', bundle id {info.BundleId}, based on N.I.N.A. {info.NinaBaseVersion}";
+                var upstream = names.Where(n => AppInfo.ContainsNina(n.Value)).Select(n => $"{n.What} '{n.Value}'").ToArray();
+                if (upstream.Length > 0) {
+                    throw new InvalidOperationException($"contains NINA: {string.Join(", ", upstream)}");
+                }
+                return $"'{info.DisplayName}', short '{info.ShortName}', bundle id {info.BundleId}, based on N.I.N.A. {info.NinaBaseVersion}" +
+                    (inBundle ? $"; {names.Count - 3} bundle names checked" : "");
             });
 
             var paths = ResourcePaths.Current;
@@ -130,6 +147,10 @@ namespace NINA.Mac.App {
                 return loaded.Count == 0 ? "none found" : string.Join(", ", loaded);
             });
 
+            // The real launch path (Avalonia.Native + Skia + HarfBuzz) in a child process: the headless platform below
+            // registers its own text shaper, so it cannot show that Program.BuildAvaloniaApp() is complete.
+            Check("native startup (Avalonia.Native, child process)", () => StartupCheck.RunInChildProcess(TimeSpan.FromSeconds(60)));
+
             MainWindowViewModel viewModel = null;
             AppServices services = null;
             MainWindow window = null;
@@ -154,11 +175,11 @@ namespace NINA.Mac.App {
             if (window != null) {
                 Check("render all screens", () => {
                     var frames = ScreenRenderer.RenderAllPages(window, viewModel, screenshots);
-                    var bad = frames.Where(f => !f.Stats.LooksRendered).Select(f => f.Page).ToArray();
+                    var bad = frames.Where(f => !f.LooksRendered).Select(f => $"{f.Page} (view {f.View ?? "none"}, page {f.Content.DistinctColors}c)").ToArray();
                     if (bad.Length > 0) {
-                        throw new InvalidOperationException($"blank frames: {string.Join(", ", bad)}");
+                        throw new InvalidOperationException($"blank or missing pages: {string.Join(", ", bad)}");
                     }
-                    return string.Join(", ", frames.Select(f => $"{f.Page} {f.Stats.Width}x{f.Stats.Height}/{f.Stats.DistinctColors}c"));
+                    return string.Join(", ", frames.Select(f => $"{f.Page} {f.Stats.Width}x{f.Stats.Height}/{f.Stats.DistinctColors}c (page {f.Content.DistinctColors}c)"));
                 });
 
                 Check("simulated night", () => {
@@ -185,9 +206,9 @@ namespace NINA.Mac.App {
                     var stats = ScreenRenderer.Capture(window, screenshots == null ? null : Path.Combine(screenshots, "night-vision.png"));
                     viewModel.ToggleNightVisionCommand.Execute(null);
                     if (stats.NonRedSamples > 0) {
-                        throw new InvalidOperationException($"{stats.NonRedSamples}/{stats.Samples} samples are not red (max G {stats.MaxGreen}, max B {stats.MaxBlue})");
+                        throw new InvalidOperationException($"{stats.NonRedSamples}/{stats.Samples} samples are not red (max G {stats.MaxGreen}, max B {stats.MaxBlue}, max G,B/R {stats.MaxGreenBlueToRed:0.00})");
                     }
-                    return $"red only (max R/G/B {stats.MaxRed}/{stats.MaxGreen}/{stats.MaxBlue})";
+                    return $"red only (max R/G/B {stats.MaxRed}/{stats.MaxGreen}/{stats.MaxBlue}, max G,B/R {stats.MaxGreenBlueToRed:0.00})";
                 });
                 window.Close();
             }

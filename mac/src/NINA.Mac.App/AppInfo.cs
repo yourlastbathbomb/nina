@@ -16,6 +16,7 @@ using NINA.Mac.Platform;
 using System;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace NINA.Mac.App {
 
@@ -35,7 +36,7 @@ namespace NINA.Mac.App {
 
         public static AppInfo Current => current.Value;
 
-        /// <summary>"Nightglass (working name)" until the fork is named. Never contains "NINA" (enforced at build time).</summary>
+        /// <summary>"Nightglass" (AppDisplayName). Never contains "NINA" (enforced at build time).</summary>
         public string DisplayName { get; }
 
         /// <summary>Folder/executable-safe name, e.g. "Nightglass".</summary>
@@ -50,13 +51,21 @@ namespace NINA.Mac.App {
 
         public AppIdentity Identity => new(DisplayName, ShortName, BundleId);
 
+        /// <summary>
+        /// True when <paramref name="name"/> contains "NINA" once everything but letters is removed, ignoring case
+        /// ("N.I.N.A.", "N I N A", "Nina", "local.nina.mac"). The fork must not use the upstream name (MPL-2.0 grants no
+        /// trademark rights). NINA.Mac.App.csproj (CheckAppIdentity) and mac/packaging/package-app.sh apply the same rule.
+        /// </summary>
+        public static bool ContainsNina(string name) =>
+            name != null && Regex.Replace(name, @"[^\p{L}]", "").Contains("NINA", StringComparison.OrdinalIgnoreCase);
+
         public static AppInfo FromAssembly(Assembly assembly) {
             string Meta(string key) => assembly.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == key)?.Value;
             var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.0.0";
             var plus = informational.IndexOf('+');
             var version = plus < 0 ? informational : informational[..plus];
             return new AppInfo(
-                Meta("AppDisplayName") ?? "Nightglass (working name)",
+                Meta("AppDisplayName") ?? "Nightglass",
                 Meta("AppShortName") ?? "Nightglass",
                 Meta("AppBundleId") ?? "local.nightglass.mac",
                 version,

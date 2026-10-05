@@ -18,7 +18,6 @@ using System.Collections.ObjectModel;
 using System.IO.Ports;
 using System.Linq;
 using System.Management;
-using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 
 namespace NINA.Core.Utility.SerialCommunication {
@@ -109,7 +108,6 @@ namespace NINA.Core.Utility.SerialCommunication {
             return new ReadOnlyCollection<string>(result);
         }
 
-        [SupportedOSPlatform("windows")]
         private IEnumerable<string> GetComPortsForQuery(string query) {
             var result = new List<string>();
             var searcher = new ManagementObjectSearcher(query);

@@ -263,7 +263,8 @@ namespace NINA.Mac.Lx200.Sim {
                     return;
                 }
                 commandCount++;
-                nak = (o.NakEveryNth > 0 && commandCount % o.NakEveryNth == 0) || (o.NakWhileBusy && now < busyUntil);
+                nak = (o.NakEveryNth > 0 && commandCount % o.NakEveryNth == 0) || (o.NakWhileBusy && now < busyUntil)
+                    || (o.HaltsNaked && body is "Q" or "Qn" or "Qs" or "Qe" or "Qw" or "FQ");
             }
             Record(text, nak);
             if (nak) {
@@ -344,7 +345,7 @@ namespace NINA.Mac.Lx200.Sim {
                 case "GZ": return FormatAzimuth(axisAz) + "#";
                 case "Gr": return FormatRa(targetRa) + "#";
                 case "Gd": return FormatSigned(targetDec) + "#";
-                case "D": return slew != null ? $"{(char)o.DistanceBar}#" : "#";
+                case "D": return slew != null && (now - slew.Start).TotalSeconds >= o.DistanceBarDelaySeconds ? $"{(char)o.DistanceBar}#" : "#";
                 case "GS": return FormatHms(Lst(now)) + "#";
                 case "GL": return FormatHms(LocalOf(MountUtcAt(now)).TimeOfDay.TotalHours) + "#";
                 case "GC": return MountDateForGc(now).ToString("MM'/'dd'/'yy", Inv) + "#";

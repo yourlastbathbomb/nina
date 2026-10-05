@@ -289,11 +289,18 @@ namespace NINA.Mac.App.Test.Ui {
             vm.AboutRequested += (_, _) => raised++;
             vm.ShowAboutCommand.Execute(null);
             raised.Should().Be(1);
-            vm.About.AppName.Should().Be("Nightglass (working name)");
+            vm.About.AppName.Should().Be("Nightglass");
             vm.About.AppName.Replace(".", "").Should().NotContainEquivalentOf("NINA");
             vm.About.BasedOnText.Should().StartWith("Based on N.I.N.A.").And.Contain("3.3.0");
             vm.About.LicenseText.Should().Contain("Mozilla Public License").And.Contain("MPL-2.0");
             vm.About.ThirdParty.Should().Contain(t => t.StartsWith("libusb") && t.Contains("LGPL-2.1"));
+            // Everything bundled is credited; SOFA's licence (clause 3(a)) requires its statement
+            vm.About.ThirdParty.Should().Contain(t => t.StartsWith("IAU SOFA")
+                && t.Contains("uses routines and computations derived by its developers from software provided by SOFA under license to them")
+                && t.Contains("does not itself constitute software provided by and/or endorsed by SOFA"));
+            vm.About.ThirdParty.Should().Contain(t => t.StartsWith("NOVAS") && t.Contains("U.S. Naval Observatory"));
+            vm.About.ThirdParty.Should().Contain(t => t.StartsWith("JPL") && t.Contains("Jet Propulsion Laboratory"));
+            vm.About.ThirdParty.Should().Contain(t => t.Contains("Inter") && t.Contains("SIL Open Font License"));
         }
     }
 }
