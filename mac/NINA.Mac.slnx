@@ -1,8 +1,12 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
     <Project Path="src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
     <Project Path="src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <Project Path="src/NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <Project Path="src/NINA.Image.Mac/NINA.Image.Mac.csproj" />
     <Project Path="src/NINA.Mac.App/NINA.Mac.App.csproj" />
+    <Project Path="src/NINA.Mac.Equipment.Lx200/NINA.Mac.Equipment.Lx200.csproj" />
     <Project Path="src/NINA.Mac.ImageAnalysis/NINA.Mac.ImageAnalysis.csproj" />
     <Project Path="src/NINA.Mac.Lx200.Sim/NINA.Mac.Lx200.Sim.csproj" />
     <Project Path="src/NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
@@ -29,6 +33,9 @@
     <Project Path="tests/NINA.Mac.App.Test/NINA.Mac.App.Test.csproj" />
     <Project Path="tests/NINA.Mac.Astrometry.Test/NINA.Mac.Astrometry.Test.csproj" />
     <Project Path="tests/NINA.Mac.Engine.Test/NINA.Mac.Engine.Test.csproj" />
+    <Project Path="tests/NINA.Mac.Equipment.Lx200.Test/NINA.Mac.Equipment.Lx200.Test.csproj" />
+    <Project Path="tests/NINA.Mac.Equipment.Test/NINA.Mac.Equipment.Test.csproj" />
+    <Project Path="tests/NINA.Mac.Image.Test/NINA.Mac.Image.Test.csproj" />
     <Project Path="tests/NINA.Mac.ImageAnalysis.Test/NINA.Mac.ImageAnalysis.Test.csproj" />
     <Project Path="tests/NINA.Mac.Lx200.Test/NINA.Mac.Lx200.Test.csproj" />
     <Project Path="tests/NINA.Mac.RigTools.Test/NINA.Mac.RigTools.Test.csproj" />

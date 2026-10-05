@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream Accord.Imaging (NINA's fork of the Accord.NET imaging library, LGPL-2.1) compiled for macOS by link, as
+    "Accord.Imaging (NETStandard).csproj" builds it on Windows: same assembly name, netstandard2.0, versions and packages.
+    A shadow project rather than a ProjectReference to the upstream csproj, because that one builds into the upstream tree
+    and packs a NuGet package into $(SolutionDir)publish on every build (GeneratePackageOnBuild).
+
+    The upstream folder is named AccordUpstreamDir, not UpstreamDir: NINA.Mac.Engine.Test's UpstreamParityTest assumes
+    <folder>/<folder>.csproj, which here is the legacy .NET Framework project. NINA.Mac.Image.Test's
+    AccordImagingParityTest compares this project with "Accord.Imaging (NETStandard).csproj" instead.
+    See ../README-engine.md (NINA.Image).
+  -->
+
+  <PropertyGroup>
+    <AssemblyName>Accord.Imaging</AssemblyName>
+    <RootNamespace>Accord.Imaging</RootNamespace>
+    <!-- As upstream. Retargeting to net10.0 fails: Accord.Range is ambiguous with System.Range (35 errors, plan E9) -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- A portable library, as upstream; mac/Directory.Build.props sets osx-arm64 for the apps and engine assemblies -->
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <!-- The C# version upstream gets for netstandard2.0 (mac/Directory.Build.props sets latest), so the code means the same -->
+    <LangVersion>7.3</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>3.5.3</Version>
+    <FileVersion>3.8.3.6155</FileVersion>
+    <Deterministic>true</Deterministic>
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <AccordUpstreamDir>$(NinaRoot)Accord.Imaging/</AccordUpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Every upstream source, as the SDK default glob compiles them upstream -->
+    <Compile Include="$(AccordUpstreamDir)**/*.cs" Exclude="$(AccordUpstreamDir)obj/**;$(AccordUpstreamDir)bin/**" LinkBase="Upstream" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as "Accord.Imaging (NETStandard).csproj" -->
+  <ItemGroup>
+    <PackageReference Include="Accord" Version="3.8.2-alpha" />
+    <PackageReference Include="Accord.Math" Version="3.8.2-alpha" />
+    <PackageReference Include="Accord.Statistics" Version="3.8.2-alpha" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.2" />
+  </ItemGroup>
+
+</Project>

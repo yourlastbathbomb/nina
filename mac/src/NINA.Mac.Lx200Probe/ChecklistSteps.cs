@@ -462,6 +462,20 @@ namespace NINA.Mac.Lx200Probe {
             if (ConfirmPart(s, string.Create(Inv, $"Slew back to the start (RA {Hms(start.Ra)} Dec {Dms(start.Dec)})?"))) {
                 var ok = Goto(s, start.Ra, start.Dec, p, "Return");
                 back = ok == true ? "returned" : "return failed";
+                if (ok == true) {
+                    // as after the goto: a :D# that never shows a bar ends the polling while the mount still slews
+                    var home = ReadPos();
+                    var miss = Lx200Astro.SeparationDeg(home.Ra, home.Dec, start.Ra, start.Dec) * 3600;
+                    if (miss > opt.SyncGuardArcsec) {
+                        var still = Tx(":D#");
+                        Halt(":Q#");
+                        s.Conclusions.Add(string.Create(Inv, $"Return: the mount's own position is {miss / 3600:0.00}° from the start (limit {opt.SyncGuardArcsec / 60:0}'), and :D# now answers [{still.RawHex}]: the slew had not really ended when :D# showed no bar. Sent :Q#. Check the trace before relying on :D#."));
+                        s.Outcome = StepOutcome.Failed;
+                        back = string.Create(Inv, $"return ended {miss:0}\" from the start: stopped with :Q#");
+                    } else {
+                        s.Conclusions.Add(string.Create(Inv, $"Return ended {miss:0}\" from the start by the mount's own readback."));
+                    }
+                }
             }
             s.Summary = string.Create(Inv, $"goto {distance:0}° ok, {err:0}\" off; :CM# {(cmFixed ? "fixed string" : "UNEXPECTED")}; {back}");
         }

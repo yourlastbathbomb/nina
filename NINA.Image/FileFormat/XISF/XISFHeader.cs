@@ -892,7 +892,9 @@ namespace NINA.Image.FileFormat.XISF {
         }
 
         public void Save(Stream s) {
-            using (System.Xml.XmlWriter sw = System.Xml.XmlWriter.Create(s, new System.Xml.XmlWriterSettings { OmitXmlDeclaration = false, Indent = true, Encoding = new UTF8Encoding(false) })) {
+            // Line breaks are "\r\n" on every OS (the XmlWriterSettings default is Environment.NewLine), so the header bytes,
+            // ByteCount and the attachment offsets are the same as in a file written on Windows
+            using (System.Xml.XmlWriter sw = System.Xml.XmlWriter.Create(s, new System.Xml.XmlWriterSettings { OmitXmlDeclaration = false, Indent = true, NewLineChars = "\r\n", Encoding = new UTF8Encoding(false) })) {
                 Content.Save(sw);
             }
         }

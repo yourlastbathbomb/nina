@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NINA.Image (and Accord.Imaging) on macOS:
+    - Mac/: tests for the mac build of NINA.Image: the managed FITS writer read back by an independent FITS reader (plus
+      fitsverify, listhead and Siril when installed), XISF round trips through NINA's own reader, the metadata to FITS header
+      path card by card, ImageArray/ImageStatistics, the rendering glue over WpfCompat's BitmapSource, the star-detection
+      seam, the platform limits (GDI+, CFITSIO, WIC) and the Accord.Imaging shadow project's parity with its upstream csproj.
+      AsiFrameHardwareTest is [Explicit] (Category Hardware): it needs the ZWO camera and never runs by default.
+    - Upstream/: upstream NINA.Test fixtures, linked unchanged, that need only NINA.Core, NINA.Profile, NINA.Astrometry and
+      NINA.Image. Fixtures that need WPF, Equipment or the app are left out; tests inside the linked fixtures that need GDI+
+      or WIC are reported as Skipped by Mac/MacPlatformSkips.cs. See ../../src/README-engine.md.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Image.Test</RootNamespace>
+    <!-- As NINA.Test.csproj, so the linked upstream fixtures compile exactly as they do on Windows -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../../src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../../src/Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <!--
+      The M1 probe carries the upstream ZWO binding (ASICameraDll.cs, built without nullable annotations as upstream builds it);
+      only the [Explicit] hardware test (Mac/AsiFrameHardwareTest.cs) uses it
+    -->
+    <ProjectReference Include="../../src/NINA.Mac.ZwoProbe/NINA.Mac.ZwoProbe.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NinaRoot</_Parameter1>
+      <_Parameter2>$(NinaRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- Upstream NINA.Test fixtures, linked unchanged -->
+  <PropertyGroup>
+    <UpstreamTests>$(NinaRoot)NINA.Test/</UpstreamTests>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- global using NUnit.Framework, plus the SetUpFixture that preloads the natives (DllLoader is a no-op off Windows) -->
+    <Compile Include="$(UpstreamTests)Usings.cs" Link="Upstream/Usings.cs" />
+
+    <Compile Include="$(UpstreamTests)ImageDataFactoryTestUtility.cs" Link="Upstream/ImageDataFactoryTestUtility.cs" />
+    <Compile Include="$(UpstreamTests)FITSTest.cs" Link="Upstream/FITSTest.cs" />
+    <Compile Include="$(UpstreamTests)XISFTest.cs" Link="Upstream/XISFTest.cs" />
+    <Compile Include="$(UpstreamTests)ImageDataTest.cs" Link="Upstream/ImageDataTest.cs" />
+    <Compile Include="$(UpstreamTests)FilePatternTest.cs" Link="Upstream/FilePatternTest.cs" />
+    <Compile Include="$(UpstreamTests)Utility/ImageUtilityTest.cs" Link="Upstream/Utility/ImageUtilityTest.cs" />
+    <Compile Include="$(UpstreamTests)Image/ExposureDataFactoryTest.cs" Link="Upstream/Image/ExposureDataFactoryTest.cs" />
+    <Compile Include="$(UpstreamTests)Image/StarDetectionMeasurementTest.cs" Link="Upstream/Image/StarDetectionMeasurementTest.cs" />
+    <Compile Include="$(UpstreamTests)Image/FileFormat/*.cs" LinkBase="Upstream/Image/FileFormat" />
+    <Compile Include="$(UpstreamTests)Image/ImageAnalysis/*.cs" LinkBase="Upstream/Image/ImageAnalysis" />
+    <Compile Include="$(UpstreamTests)Image/ImageData/*.cs" LinkBase="Upstream/Image/ImageData" />
+    <Compile Include="$(UpstreamTests)Image/RawConverter/*.cs" LinkBase="Upstream/Image/RawConverter" />
+  </ItemGroup>
+
+
+</Project>

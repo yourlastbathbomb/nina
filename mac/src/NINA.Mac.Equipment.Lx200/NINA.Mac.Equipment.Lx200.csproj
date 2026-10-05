@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M4: the native Meade LX200GPS / Autostar II driver inside the engine, for an ALT-AZ fork mount (no wedge) with the #1209
+    focuser on the mount's serial port. NINA's own ITelescope and IFocuser (NINA.Equipment.Mac) on top of the M2 protocol
+    library (NINA.Mac.Lx200: command catalog with reply shapes, NAK retry, ACK resync, byte trace):
+    - Lx200Link: one serial link shared by mount and focuser, priority lanes (stop > timed > command > poll), automatic
+      reconnect after a USB-serial unplug/replug.
+    - Lx200Telescope, Lx200Focuser: the devices; Lx200EquipmentProvider hands them to NINA.Equipment.Mac's choosers.
+    See ../README-engine.md (NINA.Mac.Equipment.Lx200).
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.Equipment.Lx200</RootNamespace>
+    <AssemblyName>NINA.Mac.Equipment.Lx200</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.Equipment.Lx200.Test" />
+  </ItemGroup>
+
+</Project>

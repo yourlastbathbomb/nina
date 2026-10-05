@@ -89,6 +89,27 @@ namespace NINA.Mac.Lx200.Test {
             h.Sim.AnyAxisMotion.Should().BeFalse("the probe stopped the slew it could not see");
         }
 
+        [Test]
+        public void Goto_ReturnSlewWithoutABar_IsStopped_NotReportedAsReturned() {
+            // the goto shows its bar, the slew back to the start does not: the return must not be reported as done
+            using var h = new SimHarness(new SimOptions { SlewSeconds = 4, PlanetaryUpdateSeconds = 0.2 });
+            h.Sim.CommandReceived += c => {
+                if (c == ":CM#") {
+                    h.Sim.Options.DistanceBarDelaySeconds = 60;
+                }
+            };
+            var checklist = AutoYes(h, Only("no-bar-return", 5));
+
+            checklist.Run().Should().Be(1, "a return slew that does not end at the start is a failed step");
+
+            var step = checklist.Document.Steps[4];
+            step.Outcome.Should().Be(StepOutcome.Failed, All(step));
+            h.Transmitted(":CM#").Should().BeTrue("the goto itself ended on its target, so the sync was sent");
+            step.Summary.Should().Contain(":CM# fixed string").And.Contain("return ended").And.NotContain("; returned");
+            step.Conclusions.Should().Contain(c => c.StartsWith("Return: the mount's own position is", StringComparison.Ordinal), All(step));
+            h.Sim.AnyAxisMotion.Should().BeFalse("the probe stopped the return slew it could not see");
+        }
+
         // ---- step 3: site ---------------------------------------------------------------------------
 
         [TestCase(60.0, TestName = "Site_MountClockAMinuteFast_BothLongitudeFormsStillJudgedRight")]

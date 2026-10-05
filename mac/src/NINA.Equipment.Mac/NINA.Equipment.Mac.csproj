@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The rig subset of upstream NINA.Equipment compiled for net10.0 / osx-arm64 (headless engine): the device-independent
+    contracts (device, mediator and view-model interfaces, capture model, exceptions, every *Info class), the ZWO ASI camera,
+    the mount-only DirectGuider and the no-op DummyGuider. Upstream files are linked, never copied.
+
+    OPT-IN include list: unlike Core, Profile, Astrometry and Image, nothing is globbed from the upstream root, so a vendor
+    driver or SDK binding that upstream adds later stays out of the mac build without anyone noticing it. Only the contract
+    folders (Interfaces/, Model/, Exceptions/) and the *Info classes are globbed; a new file there that needs an excluded type
+    or WPF fails the compile, which is the review trigger. Mac/ holds the mac-only files compiled into the same assembly
+    (resolver registration and the vendor-free device choosers). See ../README-engine.md (NINA.Equipment).
+
+    The folder property is EquipmentUpstreamDir, not UpstreamDir: the mac project deliberately drops upstream's vendor packages
+    (ASCOM, Castle, gRPC named pipes, NJsonSchema, NMEA), so NINA.Mac.Engine.Test's UpstreamParityTest, which requires every
+    upstream package, would fail on it. NINA.Mac.Equipment.Test's EquipmentParityTest compares this file with
+    NINA.Equipment.csproj instead and pins every dropped package with its reason.
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Equipment</AssemblyName>
+    <RootNamespace>NINA.Equipment</RootNamespace>
+    <EquipmentUpstreamDir>$(NinaRoot)NINA.Equipment/</EquipmentUpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(EquipmentUpstreamDir)Properties/AssemblyInfo.cs" LinkBase="Upstream/Properties" />
+
+    <!-- Device-independent contracts: device, mediator and view-model interfaces, the capture model, exceptions -->
+    <Compile Include="$(EquipmentUpstreamDir)Interfaces/**/*.cs" LinkBase="Upstream/Interfaces" />
+    <Compile Include="$(EquipmentUpstreamDir)Model/**/*.cs" LinkBase="Upstream/Model" />
+    <Compile Include="$(EquipmentUpstreamDir)Exceptions/**/*.cs" LinkBase="Upstream/Exceptions" />
+    <!--
+      ISVBonySDK.cs extends the SVBony SDK binding (namespace NINA.Equipment.SDK.CameraSDKs.SVBonySDK), which is excluded.
+      (Model/CaptureSequenceList.cs, the legacy simple sequencer's target list, compiles against WpfCompat and stays in, unlike
+      the M3b plan's list: upstream's CaptureSequenceTest and CaptureSequenceBehaviorTest need it.)
+    -->
+    <Compile Remove="$(EquipmentUpstreamDir)Interfaces/ISVBonySDK.cs" />
+
+    <!-- Shared device plumbing, and every device's *Info class: the mediator and view-model interfaces carry all of them -->
+    <Compile Include="$(EquipmentUpstreamDir)Equipment/DeviceInfo.cs;$(EquipmentUpstreamDir)Equipment/DummyDevice.cs;$(EquipmentUpstreamDir)Equipment/OfflineDevice.cs;$(EquipmentUpstreamDir)Equipment/GuideStepsHistory.cs" LinkBase="Upstream/Equipment" />
+    <Compile Include="$(EquipmentUpstreamDir)Equipment/My*/*Info.cs" LinkBase="Upstream/Equipment" />
+
+    <!-- ZWO ASI camera: the driver, its enumeration, the profile decorator CameraVM wraps every camera in, and the SDK binding -->
+    <Compile Include="$(EquipmentUpstreamDir)Equipment/MyCamera/ASICamera.cs;$(EquipmentUpstreamDir)Equipment/MyCamera/ASICameras.cs;$(EquipmentUpstreamDir)Equipment/MyCamera/PersistSettingsCameraDecorator.cs" LinkBase="Upstream/Equipment/MyCamera" />
+    <Compile Include="$(EquipmentUpstreamDir)SDK/CameraSDKs/ASISDK/ASICameraDll.cs" LinkBase="Upstream/SDK/CameraSDKs/ASISDK" />
+
+    <!--
+      Guiders: the mount-only DirectGuider (dithers through ITelescopeMediator.PulseGuide), its offset selector, and the no-op
+      DummyGuider. The PHD2 event classes are plain data that the IGuider contract (GuideStepsHistory, IGuiderMediator) carries;
+      the PHD2 client itself (PHD2Guider and friends) is not compiled.
+    -->
+    <Compile Include="$(EquipmentUpstreamDir)Equipment/MyGuider/DirectGuider.cs;$(EquipmentUpstreamDir)Equipment/MyGuider/DitherOffsetSelector.cs;$(EquipmentUpstreamDir)Equipment/MyGuider/DummyGuider.cs;$(EquipmentUpstreamDir)Equipment/MyGuider/RMSError.cs;$(EquipmentUpstreamDir)Equipment/MyGuider/LockPosition.cs" LinkBase="Upstream/Equipment/MyGuider" />
+    <Compile Include="$(EquipmentUpstreamDir)Equipment/MyGuider/PHD2/PhdEvents/*.cs" LinkBase="Upstream/Equipment/MyGuider/PHD2/PhdEvents" />
+
+    <!-- Image metadata from the device infos (FromCamera, FromTelescopeInfo, ...) -->
+    <Compile Include="$(EquipmentUpstreamDir)Utility/ImageMetaDataExtension.cs" LinkBase="Upstream/Utility" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <!-- DllImport resolver ("ASICamera2.dll" -> libASICamera2.dylib) registered for this assembly by Mac/NativeRegistration.cs -->
+    <ProjectReference Include="../NINA.Mac.Native/NINA.Mac.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    Upstream's packages that the kept files need, at upstream's versions. The vendor packages are dropped; each is pinned with
+    its reason by EquipmentParityTest: ASCOM.Alpaca.Components, ASCOM.Alpaca.Device, ASCOM.Com.Components, Castle.Core,
+    Castle.Core.AsyncInterceptor, GrpcDotNetNamedPipes, NJsonSchema, SharpGIS.NmeaParser, Google.Protobuf.Tools, Grpc.Tools and
+    Microsoft.NETFramework.ReferenceAssemblies. So are the project references to nikoncswrapper and NINA.MGEN.
+  -->
+  <ItemGroup>
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Image compiled for net10.0 / osx-arm64 (headless engine). Upstream files are linked, never copied, and
+    all 68 compile: the rendering and GDI+ analysis code is type-coupled to the save path (BaseImageData.RenderImage,
+    ExposureDataFactory, IRenderedImage carry BitmapSource), so it builds against NINA.Mac.WpfCompat's imaging stand-ins
+    and System.Drawing.Common and only throws if a GDI+ path is called. Mac/ holds the mac-only files compiled into the
+    same assembly. See ../README-engine.md (NINA.Image).
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Image</AssemblyName>
+    <RootNamespace>NINA.Image</RootNamespace>
+    <UpstreamDir>$(NinaRoot)NINA.Image/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- No Compile Remove: every upstream file compiles unchanged -->
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Upstream's NINA.Image.csproj references "Accord.Imaging (NETStandard).csproj"; this is its mac shadow (same assembly) -->
+    <ProjectReference Include="../Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <!-- DllImport resolver registered for this assembly by Mac/NativeRegistration.cs -->
+    <ProjectReference Include="../NINA.Mac.Native/NINA.Mac.Native.csproj" />
+  </ItemGroup>
+
+  <!--
+    Same packages and versions as NINA.Image.csproj. System.Drawing.Common, which NINA.Image gets from the WindowsDesktop
+    framework on Windows (UseWindowsForms), arrives through Accord.Imaging.Mac's PackageReference, as Accord.Imaging declares it.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Iconic.Zlib.Netstandard" Version="1.0.0" />
+    <PackageReference Include="K4os.Compression.LZ4" Version="1.3.8" />
+    <PackageReference Include="Nito.AsyncEx" Version="5.1.2" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+  </ItemGroup>
+
+</Project>

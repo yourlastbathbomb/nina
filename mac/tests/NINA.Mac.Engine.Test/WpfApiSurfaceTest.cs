@@ -139,14 +139,25 @@ namespace NINA.Mac.Engine.Test {
         }
 
         private static bool Same(TypeReference wpf, Type compat) {
-            return Normalize(wpf.FullName) == Normalize(compat.FullName ?? compat.Name);
+            // Cecil writes nested types as Outer/Inner where reflection writes Outer+Inner
+            return wpf.FullName.Replace('/', '+') == CecilName(compat);
         }
 
-        private static string Normalize(string name) {
-            // Cecil writes nested types and generic instances differently from reflection
-            name = name.Replace('/', '+');
-            var tick = name.IndexOf('[');
-            return tick > 0 && name.Contains('`') ? name.Substring(0, tick) : name;
+        /// <summary>
+        /// A reflection type in Cecil's FullName notation, so generic instances compare with their arguments:
+        /// Cecil writes IList`1&lt;System.Windows.Media.Imaging.BitmapFrame&gt;, reflection IList`1[[..., assembly]].
+        /// </summary>
+        private static string CecilName(Type type) {
+            if (type.IsByRef) {
+                return CecilName(type.GetElementType()) + "&";
+            }
+            if (type.IsArray) {
+                return CecilName(type.GetElementType()) + "[" + new string(',', type.GetArrayRank() - 1) + "]";
+            }
+            if (type.IsGenericType && !type.IsGenericTypeDefinition) {
+                return CecilName(type.GetGenericTypeDefinition()) + "<" + string.Join(",", type.GetGenericArguments().Select(CecilName)) + ">";
+            }
+            return type.FullName ?? type.Name;
         }
     }
 }
