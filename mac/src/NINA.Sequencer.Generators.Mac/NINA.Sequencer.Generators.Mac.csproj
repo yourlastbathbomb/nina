@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Sequencer.Generators (the [UsesExpressions] / [IsExpression] source generator and its analyzers), compiled from
+    the upstream sources by link so bin/obj stay out of the upstream tree. Same assembly name, target and packages as
+    NINA.Sequencer.Generators.csproj. It is both an analyzer (it generates Clone(), the expression-backed properties and
+    validation for every [UsesExpressions] class) and a normal assembly reference: the attribute types are declared in the
+    generator assembly itself (ExpressionGenerator.cs), so NINA.Sequencer.Mac references it as upstream does, with
+    OutputItemType="Analyzer" and the default ReferenceOutputAssembly=true. See ../README-engine.md (NINA.Sequencer).
+  -->
+  <PropertyGroup>
+    <AssemblyName>NINA.Sequencer.Generators</AssemblyName>
+    <RootNamespace>NINA.Sequencer.Generators</RootNamespace>
+    <GeneratorsUpstreamDir>$(NinaRoot)NINA.Sequencer.Generators/</GeneratorsUpstreamDir>
+    <!-- As upstream: a portable netstandard2.0 analyzer, so the RID and LangVersion of mac/Directory.Build.props do not apply -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <Deterministic>true</Deterministic>
+    <Version>3.3.0.1064-nightly</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(GeneratorsUpstreamDir)*.cs" LinkBase="Upstream" />
+    <AdditionalFiles Include="$(GeneratorsUpstreamDir)AnalyzerReleases.Shipped.md" Link="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="$(GeneratorsUpstreamDir)AnalyzerReleases.Unshipped.md" Link="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.Sequencer.Generators.csproj -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="5.6.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+
+</Project>

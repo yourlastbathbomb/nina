@@ -159,6 +159,9 @@ namespace NINA.Mac.Lx200.Sim {
         /// <summary>Answer every Nth command with NAK once (0 = never). Tests the retry path.</summary>
         public int NakEveryNth { get; set; }
 
+        /// <summary>Answer NAK (busy), instead of the reply, to every command this returns true for, e.g. <c>c => c == ":GR#"</c>; null = none.</summary>
+        public Func<string, bool> NakWhen { get; set; }
+
         /// <summary>Put junk bytes in front of every Nth reply (0 = never). Tests resync.</summary>
         public int GarbageEveryNth { get; set; }
 

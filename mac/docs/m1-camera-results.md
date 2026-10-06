@@ -27,3 +27,14 @@ These results were measured on 2026-10-04 with `zwoprobe`, using ZWO SDK 1.41 (o
 
 - **Fixed (2026-10-05):** upstream test `GetImageFileString_PathSegmentsAndImageTypeOverride_ReturnsSafePath` failed on macOS. `Path.GetInvalidFileNameChars()` doesn't include `:`, so a target named "M31:Core" becomes `M31:Core` on macOS, where Windows writes `M31_Core`. Colons break copying to exFAT or Windows drives, and Finder shows them as `/`. The Mac build should sanitise file names with the Windows character set.
 - Re-run the endurance loop on a direct USB 3 connection and compare the overhead.
+
+## Engine hardware tests (2026-10-06)
+
+The camera was plugged directly into the Air: ioreg shows `ASI585MC Pro` at **5 Gb/s (USB 3)**. Both explicit hardware tests passed through NINA's own engine on macOS:
+
+| Test | Result |
+|---|---|
+| `AsiCameraHardwareTest` (Equipment.Test) | NINA's `ASICamera` connected (SDK `1, 41, 0, 0`, cooler off at connect), took a 1 s bin-2 light through `StartExposure` / `DownloadExposure` and NINA's FITS writer: 1920 x 1080, `BAYERPAT=RGGB`, `ROWORDER=TOP-DOWN`, `XPIXSZ=5.8`, `GAIN=200`, `OFFSET=3`, `CCD-TEMP=16.5`. Siril 1.4.4 read "RGGB from header, top-down from header" and debayered it (R/G/B medians 340). `ASI_COOLER_ON` read back 0 at the end |
+| `AsiFrameHardwareTest` (Image.Test) | A real bin-2 frame saved through `NINA.Image` into NINA's dated `LIGHT` folder; Siril debayered means R 348.2 / G 347.9 / B 347.9 (cap on). Cooler off on exit |
+
+Notes for later: the FITS header still says `SWCREATE='N.I.N.A. 3.3.0.1064 (x64)'` on arm64 (branding and architecture for M9), and NINA's connect-time defaults log failed writes for `ASI_GAMMA`, `ASI_OVERCLOCK`, `ASI_PATTERN_ADJUST` and `ASI_ANTI_DEW_HEATER` (harmless warnings, but check the dew heater control before relying on it).

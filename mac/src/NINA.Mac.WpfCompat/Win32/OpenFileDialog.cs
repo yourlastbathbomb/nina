@@ -15,8 +15,8 @@
 namespace Microsoft.Win32 {
 
     /// <summary>
-    /// Placeholder for WPF's OpenFileDialog, which NINA.Core's CoreUtil.GetFilteredFileDialog returns.
-    /// File dialogs belong to the macOS UI layer: construction throws.
+    /// Placeholder for WPF's OpenFileDialog, which NINA.Core's CoreUtil.GetFilteredFileDialog returns and NINA.Sequencer's
+    /// ExternalScript opens from its "browse" command. File dialogs belong to the macOS UI layer: construction throws.
     /// </summary>
     public sealed class OpenFileDialog {
 
@@ -29,5 +29,13 @@ namespace Microsoft.Win32 {
         public string FileName { get; set; }
 
         public string Filter { get; set; }
+
+        public string Title { get; set; }
+
+        public string DefaultExt { get; set; }
+
+        public bool? ShowDialog() {
+            throw new System.PlatformNotSupportedException("Microsoft.Win32.OpenFileDialog is WPF user interface and does not exist in the macOS engine.");
+        }
     }
 }

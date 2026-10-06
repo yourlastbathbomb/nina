@@ -98,6 +98,19 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             }
         }
 
+        /// <summary>Bytes that reach the Mac as if the mount had sent them (a stray byte, line noise), right now.</summary>
+        public void Inject(params byte[] bytes) {
+            Stream target;
+            lock (sync) {
+                target = session;
+            }
+            try {
+                target?.Write(bytes, 0, bytes.Length);
+            } catch (IOException) {
+            } catch (ObjectDisposedException) {
+            }
+        }
+
         /// <summary>The cable stays, but nothing comes back (mount switched off): the session stays open and silent.</summary>
         public void Mute(bool value) {
             lock (sync) {

@@ -20,6 +20,7 @@ using NINA.Profile.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -347,13 +348,23 @@ namespace NINA.Mac.Equipment.Lx200 {
 
         /// <summary>
         /// Host-timed: ":F+#" (inward) or ":F-#", then ":FQ#" at start + ms, and a second ":FQ#" right after. If the link goes down
-        /// while the motor runs, the link owes the halt and sends it first when the mount answers again; the move then counts as
-        /// having run until that halt (<see cref="Lx200Link.OwedStopSentUtc"/>), and a warning says the position is an estimate.
+        /// while the motor may run (also when it goes as the start is written), the link owes the halt and sends it first when the
+        /// mount answers again; a start answered with stray bytes is halted by the link at once. The move then counts as having
+        /// run until that halt (<see cref="Lx200Link.OwedStopSentUtc"/>), and a warning says the position is an estimate.
         /// </summary>
         private async Task<(double RanMs, bool Completed)> TimedMove(Lx200Link l, bool outward, int ms, CancellationToken halt) {
-            var start = await l.SendAsync(outward ? ":F-#" : ":F+#", Lx200Lane.Timed).ConfigureAwait(false);
+            var asked = l.UtcNow;
+            Lx200Reply start;
+            try {
+                start = await l.SendAsync(outward ? ":F-#" : ":F+#", Lx200Lane.Timed).ConfigureAwait(false);
+            } catch (Lx200DisconnectedException) when (MayRun(l, asked)) {
+                return await AfterLinkLoss(l, asked, "the link went down as the focuser started").ConfigureAwait(false);
+            }
+            if (start.Status == ReplyStatus.Nak) {
+                throw new Lx200ReplyException($"focuser start refused: {start.Describe()}", start);   // busy: nothing moved
+            }
             if (!start.IsOk) {
-                throw new Lx200ReplyException($"focuser start: {start.Describe()}", start);
+                return await AfterLinkLoss(l, start.SentUtc, $"the focuser start got an unexpected answer ({start.Status})").ConfigureAwait(false);
             }
             using var dropScheduled = new CancellationTokenSource();
             var scheduled = l.SendAsync(":FQ#", Lx200Lane.Timed, dropScheduled.Token, dueUtc: start.SentUtc + TimeSpan.FromMilliseconds(ms));
@@ -375,7 +386,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                     var first = await Task.WhenAny(scheduled, stopped.Task, lost.Task).ConfigureAwait(false);
                     if (first == lost.Task || scheduled.IsFaulted) {
                         dropScheduled.Cancel();
-                        return await AfterLinkLoss(l, start).ConfigureAwait(false);
+                        return await AfterLinkLoss(l, start.SentUtc, "the link was lost during a focuser move").ConfigureAwait(false);
                     }
                     if (first == stopped.Task) {
                         completed = false;
@@ -401,18 +412,30 @@ namespace NINA.Mac.Equipment.Lx200 {
             return ((stop.SentUtc - start.SentUtc).TotalMilliseconds, completed);
         }
 
-        private async Task<(double RanMs, bool Completed)> AfterLinkLoss(Lx200Link l, Lx200Reply start) {
-            Logger.Warning("LX200 focuser: the link went down while the focuser was moving; its halt is sent as soon as the mount answers again");
+        /// <summary>True when a start that failed may still have reached the motor: the link owes (or has just sent) its halt.</summary>
+        private static bool MayRun(Lx200Link l, DateTime asked) =>
+            l.OwedStops.Contains(":FQ#") || (l.OwedStopSentUtc(":FQ#") is { } sent && sent >= asked);
+
+        /// <summary>
+        /// The motor may have run without its scheduled halt: waits for the link to send the halt it owes (first thing after a
+        /// reconnect, or at once after a garbled start) and counts the move until then.
+        /// </summary>
+        private async Task<(double RanMs, bool Completed)> AfterLinkLoss(Lx200Link l, DateTime startUtc, string what) {
+            Logger.Warning($"LX200 focuser: {what}; the focuser may be moving, and its halt is sent as soon as the mount answers");
             var back = await l.WaitUntilConnectedAsync(l.Options.WaitForReconnect + TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            var waitForHalt = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+            while (back && !(l.OwedStopSentUtc(":FQ#") >= startUtc) && DateTime.UtcNow < waitForHalt) {
+                await Task.Delay(10).ConfigureAwait(false);
+            }
             var sent = l.OwedStopSentUtc(":FQ#");
-            if (back && sent.HasValue && sent.Value >= start.SentUtc) {
-                var ran = (sent.Value - start.SentUtc).TotalMilliseconds;
-                var message = string.Create(CultureInfo.InvariantCulture, $"the link was lost during a focuser move; the focuser was stopped when it came back, after about {ran:0} ms. The position is an estimate: check focus.");
+            if (back && sent.HasValue && sent.Value >= startUtc) {
+                var ran = (sent.Value - startUtc).TotalMilliseconds;
+                var message = string.Create(CultureInfo.InvariantCulture, $"{what}; the focuser was stopped after about {ran:0} ms. The position is an estimate: check focus.");
                 Logger.Warning("LX200 focuser: " + message);
                 Notification.ShowWarning("LX200: " + message);
                 return (ran, false);
             }
-            throw new Lx200DisconnectedException("The link was lost during a focuser move and has not come back; the focuser may still be running and its position is unknown (check focus, then recentre)");
+            throw new Lx200DisconnectedException($"{what}, and the link has not come back; the focuser may still be running and its position is unknown (check focus, then recentre)");
         }
 
         /// <summary>Mount-timed: ":FP+DDDD#" (inward) or ":FP-DDDD#", one per 65 s, waiting out each; a halt sends ":FQ#".</summary>

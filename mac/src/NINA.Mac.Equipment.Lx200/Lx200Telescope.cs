@@ -43,8 +43,9 @@ namespace NINA.Mac.Equipment.Lx200 {
     /// off. The Autostar's own park command is blocklisted: after it the Autostar answers nothing until power-cycled.</item>
     /// <item>The mount keeps its site to 1'; within <see cref="Lx200Settings.SiteToleranceArcmin"/> the profile's site is
     /// reported, so NINA's 0.001° site check does not prompt on every connect (RIM MNT-14).</item>
-    /// <item>Time and date are written only to a mount that ":GW#" says is not aligned (plan risk 3); an aligned mount's clock
-    /// is checked against the Mac (and ":GS#" against the computed sidereal time) and a difference is reported, never fixed.</item>
+    /// <item>Time, date and site are written only to a mount that ":GW#" says is not aligned (plan risk 3, "Time and site
+    /// authority"); an aligned mount's clock is checked against the Mac (and ":GS#" against the computed sidereal time) and a
+    /// difference is reported, never fixed.</item>
     /// <item>Pulse guiding (NINA's mount dither) has three strategies (<see cref="Lx200PulseStrategy"/>).</item>
     /// </list>
     /// </summary>
@@ -101,6 +102,7 @@ namespace NINA.Mac.Equipment.Lx200 {
         private TimeSpan clockOffset;
         private bool atPark;
         private bool parkStoppedTracking;
+        private bool alignmentLost;
         private bool gotoActive;
         private int abortGeneration;
         private (double Ra, double Dec)? reportedTarget;
@@ -324,6 +326,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                 gwChecked = false;
                 gwSupported = false;
                 alignment = null;
+                alignmentLost = false;
                 atPark = false;
                 parkStoppedTracking = false;
                 requestedLatitude = requestedLongitude = null;
@@ -345,6 +348,7 @@ namespace NINA.Mac.Equipment.Lx200 {
             }
 
             await RefreshStatus(token).ConfigureAwait(false);
+            RestoreSoftPark();
             await EnsureHighPrecisionFormat(token).ConfigureAwait(false);
             if (Settings.EnsureLowPrecisionPointing) {
                 await EnsureLowPrecisionPointing(token).ConfigureAwait(false);
@@ -387,7 +391,11 @@ namespace NINA.Mac.Equipment.Lx200 {
             await RefreshPosition(includeAltAz: true, token).ConfigureAwait(false);
         }
 
-        /// <summary>":GW#" (mount, tracking, alignment); when it is not answered, ACK gives the mode and tracking (RVM T2).</summary>
+        /// <summary>
+        /// ":GW#" (mount, tracking, alignment); when it is not answered, ACK gives the mode and tracking (RVM T2). An alignment that
+        /// goes from aligned to '0' while connected (the mount was switched off and on) is reported, and gotos are refused until
+        /// ":GW#" shows an alignment again.
+        /// </summary>
         private async Task RefreshStatus(CancellationToken token, Lx200Lane lane = Lx200Lane.Command) {
             bool useGw;
             lock (stateLock) {
@@ -396,6 +404,7 @@ namespace NINA.Mac.Equipment.Lx200 {
             if (useGw) {
                 var gw = await link.SendAsync(":GW#", lane, token, coalesceKey: lane == Lx200Lane.Poll ? ":GW#" : null).ConfigureAwait(false);
                 var parsed = gw.IsOk ? Lx200Firmware.ParseGw(gw.Value) : null;
+                var lostNow = false;
                 lock (stateLock) {
                     if (!gwChecked) {
                         gwChecked = true;
@@ -407,12 +416,21 @@ namespace NINA.Mac.Equipment.Lx200 {
                     if (parsed is { } p) {
                         mode = p.Mode;
                         tracking = p.Tracking;
+                        var wasAligned = alignment.HasValue && alignment.Value != '0';
                         alignment = p.Alignment;
-                        return;
+                        if (p.Alignment != '0') {
+                            alignmentLost = false;
+                        } else if (wasAligned) {
+                            alignmentLost = true;
+                            lostNow = true;
+                        }
                     }
                 }
-                if (gwSupported) {
-                    return;   // a lost poll; keep the last state
+                if (lostNow) {
+                    Fail("the mount reports that it is no longer aligned (switched off and on?). Gotos are refused until it is aligned again on the handbox.");
+                }
+                if (parsed != null || gwSupported) {
+                    return;   // with ':GW#' supported, a lost poll keeps the last state
                 }
             }
             var ack = await link.SendAsync("ack", lane, token, coalesceKey: lane == Lx200Lane.Poll ? "ACK" : null).ConfigureAwait(false);
@@ -425,6 +443,31 @@ namespace NINA.Mac.Equipment.Lx200 {
         }
 
         private bool gwChecked;
+
+        /// <summary>
+        /// A soft park survives a reconnect (<see cref="Lx200Settings.SoftParked"/>): AtPark is reported again, and Unpark resumes
+        /// tracking if the park stopped it. A mount found tracking again although the park stopped tracking was unparked on the
+        /// handbox, so the flag is dropped.
+        /// </summary>
+        private void RestoreSoftPark() {
+            if (!Settings.SoftParked) {
+                return;
+            }
+            bool trackingNow;
+            lock (stateLock) {
+                trackingNow = tracking;
+            }
+            if (Settings.SoftParkStopsTracking && trackingNow) {
+                Settings.SoftParked = false;
+                Logger.Info("LX200: the mount was soft-parked, but it is tracking again (unparked on the handbox); not parked");
+                return;
+            }
+            lock (stateLock) {
+                atPark = true;
+                parkStoppedTracking = Settings.SoftParkStopsTracking;
+            }
+            Logger.Info("LX200: the mount is still soft-parked from before; unpark it to resume");
+        }
 
         private async Task EnsureHighPrecisionFormat(CancellationToken token) {
             var gr = await Query(":GR#", token).ConfigureAwait(false);
@@ -807,13 +850,23 @@ namespace NINA.Mac.Equipment.Lx200 {
             return mountValue;
         }
 
+        /// <summary>
+        /// ":St"/":Sg", only to a mount that ":GW#" says is not aligned (plan, "Time and site authority": after alignment the port
+        /// only verifies, never writes; a new site shifts every goto). Otherwise nothing is written, the mount's value stays
+        /// reported, and NINA's own check after its site sync reports that the site could not be set.
+        /// </summary>
         private void WriteSite(bool latitude, double value) {
             var l = link;
             if (l == null || !Connected || double.IsNaN(value)) {
                 return;
             }
-            if (IsAligned != false) {
-                Logger.Warning("LX200: changing the site of an aligned mount shifts its gotos; re-align afterwards");
+            var aligned = IsAligned;
+            if (aligned != false) {
+                var why = aligned == true ? "the mount is aligned" : "':GW#' does not say whether the mount is aligned";
+                var message = string.Create(Inv, $"site {(latitude ? "latitude" : "longitude")} {value:0.0000}° not written: {why}, and a new site after alignment shifts every goto. Set the site on the handbox before aligning.");
+                Logger.Warning("LX200: " + message);
+                Notification.ShowWarning("LX200: " + message);
+                return;
             }
             var command = latitude ? $":St{Lx200Format.FormatLatitude(value)}#" : $":Sg{Lx200Format.FormatLongitudeWest360(value)}#";
             try {
@@ -1001,6 +1054,15 @@ namespace NINA.Mac.Equipment.Lx200 {
                 Notification.ShowWarning("LX200: the mount is soft-parked; unpark it first");
                 return false;
             }
+            if (AlignmentLost("goto")) {
+                return false;
+            }
+            if (!TrackingEnabled) {
+                // as NINA's AscomTelescope does before every RA/Dec slew (AscomTelescope.cs:563); NINA's sequences rely on it, e.g.
+                // after "Set Tracking: Stopped" or a soft park
+                Logger.Info("LX200: tracking is off; switching it on (':AA#') for the RA/Dec goto");
+                TrackingEnabled = true;
+            }
             var jnow = coordinates.Transform(Epoch.JNOW);
             lock (stateLock) {
                 targetCoordinates = jnow;
@@ -1040,6 +1102,9 @@ namespace NINA.Mac.Equipment.Lx200 {
         /// <summary>":Sr" + ":Sd" (each must answer '1'), ":MS#" ('0' = slewing), then <see cref="WaitForSlew"/>. JNow hours/degrees.</summary>
         internal async Task<bool> GotoAsync(double raHours, double decDegrees, CancellationToken token, string purpose) {
             var l = link ?? throw new Lx200DisconnectedException("not connected");
+            if (AlignmentLost(purpose)) {
+                return false;
+            }
             CoordinatePrecision p;
             lock (stateLock) {
                 reportedTarget = null;
@@ -1093,6 +1158,9 @@ namespace NINA.Mac.Equipment.Lx200 {
         /// <summary>":Sa" + ":Sz", ":MA#" ('0' = no fault), then <see cref="WaitForSlew"/> against ":GA#"/":GZ#".</summary>
         internal async Task<bool> GotoAltAzAsync(double altitude, double azimuth, CancellationToken token) {
             var l = link ?? throw new Lx200DisconnectedException("not connected");
+            if (AlignmentLost("alt-az goto")) {
+                return false;
+            }
             CoordinatePrecision p;
             lock (stateLock) {
                 reportedTarget = null;
@@ -1178,6 +1246,17 @@ namespace NINA.Mac.Equipment.Lx200 {
             }
         }
 
+        /// <summary>True (and reported) when ":GW#" went from aligned to not aligned during this session: every goto would be wrong.</summary>
+        private bool AlignmentLost(string purpose) {
+            lock (stateLock) {
+                if (!alignmentLost) {
+                    return false;
+                }
+            }
+            Fail($"{purpose} refused: the mount lost its alignment during this session (':GW#' reports not aligned). Align it on the handbox first.");
+            return true;
+        }
+
         private bool Aborted(int generation) {
             lock (stateLock) {
                 return abortGeneration != generation;
@@ -1189,7 +1268,12 @@ namespace NINA.Mac.Equipment.Lx200 {
             Notification.ShowError("LX200: " + message);
         }
 
-        /// <summary>":Q#" through the Stop lane, ahead of everything queued; ends a running goto wait with false.</summary>
+        /// <summary>
+        /// ":Q#" through the Stop lane, ahead of everything queued; ends a running goto wait with false. Like ASCOM's AbortSlew it
+        /// returns once the halt is on the wire (at most the one transaction already on it, capped at <see cref="StopSlewWait"/>),
+        /// so a disconnect right after it cannot overtake it. While the link is down the halt is owed and goes out first when the
+        /// mount answers again.
+        /// </summary>
         public void StopSlew() {
             var l = link;
             if (l == null) {
@@ -1199,10 +1283,22 @@ namespace NINA.Mac.Equipment.Lx200 {
                 abortGeneration++;
                 movingAxes.Clear();
             }
-            l.SendAsync(":Q#", Lx200Lane.Stop).ContinueWith(t => Logger.Warning($"LX200: ':Q#' failed: {t.Exception?.GetBaseException().Message}"),
-                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             RaisePropertyChanged(nameof(Slewing));
+            try {
+                var halt = l.SendAsync(":Q#", Lx200Lane.Stop);
+                if (!halt.Wait(StopSlewWait)) {
+                    Logger.Warning("LX200: ':Q#' is still queued behind a long transaction; it goes out before anything else");
+                } else if (!halt.Result.IsOk) {
+                    Logger.Warning($"LX200: ':Q#' {halt.Result.Describe()}");
+                }
+            } catch (AggregateException ex) {
+                Logger.Warning($"LX200: ':Q#' failed: {ex.GetBaseException().Message}");
+            } catch (Exception ex) {
+                Logger.Warning($"LX200: ':Q#' failed: {ex.Message}");
+            }
         }
+
+        private static readonly TimeSpan StopSlewWait = TimeSpan.FromSeconds(2);
 
         /// <summary>
         /// ":Sr" + ":Sd" (each '1') then ":CM#" (its fixed " M31 EX GAL ..." reply is read and dropped). Refused while slewing and
@@ -1310,6 +1406,7 @@ namespace NINA.Mac.Equipment.Lx200 {
             lock (stateLock) {
                 atPark = true;
             }
+            Settings.SoftParked = true;
             RaisePropertyChanged(nameof(AtPark));
             Logger.Info("LX200: soft-parked (halted" + (double.IsNaN(parkAlt) ? "" : string.Create(Inv, $", at alt {parkAlt:0.0} az {parkAz:0.0}")) + (Settings.SoftParkStopsTracking ? ", tracking off" : "") + ")");
         }
@@ -1324,6 +1421,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                 resume = parkStoppedTracking;
                 parkStoppedTracking = false;
             }
+            Settings.SoftParked = false;
             if (resume) {
                 TrackingEnabled = true;
             }
@@ -1424,7 +1522,11 @@ namespace NINA.Mac.Equipment.Lx200 {
                         l.Send($":Q{(rate > 0 ? minus : plus)}#", Lx200Lane.Stop);
                     }
                     l.Send(NearestRate(Math.Abs(rate)).Command, Lx200Lane.Timed);
-                    l.Send($":M{(rate > 0 ? plus : minus)}#", Lx200Lane.Timed);
+                    var start = l.Send($":M{(rate > 0 ? plus : minus)}#", Lx200Lane.Timed);
+                    if (!start.IsOk) {
+                        // refused (NAK: nothing moves), or garbled (the link halts it at once)
+                        throw new Lx200ReplyException(start.Describe(), start);
+                    }
                     lock (stateLock) {
                         movingAxes.Add(axis);
                     }
@@ -1490,20 +1592,41 @@ namespace NINA.Mac.Equipment.Lx200 {
         // Link events
         // =============================================================================================
 
+        /// <summary>
+        /// The mount may have been switched off and on while the link was down: it then starts in the low-precision format, with
+        /// High Precision pointing and the guide rate at their power-on values and no alignment. The connect checks run again
+        /// (format, ":P#", ":Rg", ":GW#", and the clock, verify only); a lost alignment is reported and stops gotos.
+        /// </summary>
+        private async Task AfterReconnect() {
+            try {
+                var token = CancellationToken.None;
+                await EnsureHighPrecisionFormat(token).ConfigureAwait(false);
+                if (Settings.EnsureLowPrecisionPointing) {
+                    await EnsureLowPrecisionPointing(token).ConfigureAwait(false);
+                }
+                if (Settings.SetGuideRateOnConnect) {
+                    var rg = await link.SendAsync(Lx200Format.GuideRateCommand(Settings.GuideRateArcsecPerSec), Lx200Lane.Command, token).ConfigureAwait(false);
+                    if (!rg.IsOk) {
+                        Logger.Warning($"LX200: guide rate not set again after the reconnect ({rg.Describe()})");
+                    }
+                }
+                await RefreshStatus(token).ConfigureAwait(false);
+                try {
+                    await CheckClock(timeSync: false, token).ConfigureAwait(false);
+                } catch (Exception ex) when (ex is FormatException or Lx200ReplyException) {
+                    Logger.Warning($"LX200: could not check the mount's clock after the reconnect: {ex.Message}");
+                }
+                Logger.Info($"LX200 mount: link restored; format, pointing precision, guide rate, status and clock checked again (aligned {IsAligned?.ToString() ?? "unknown"})");
+            } catch (Exception ex) {
+                Logger.Warning($"LX200 mount: the checks after the reconnect failed: {ex.Message}");
+            }
+        }
+
         private void OnLinkStateChanged(Lx200LinkState state) {
             RaisePropertyChanged(nameof(LinkState));
             switch (state) {
                 case Lx200LinkState.Connected when Connected:
-                    // the mount may have been switched off and on: it then starts in the low-precision format again
-                    _ = Task.Run(async () => {
-                        try {
-                            await EnsureHighPrecisionFormat(CancellationToken.None).ConfigureAwait(false);
-                            await RefreshStatus(CancellationToken.None).ConfigureAwait(false);
-                            Logger.Info("LX200 mount: link restored, format and status re-read");
-                        } catch (Exception ex) {
-                            Logger.Warning($"LX200 mount: re-reading the status after the reconnect failed: {ex.Message}");
-                        }
-                    });
+                    _ = Task.Run(AfterReconnect);
                     break;
                 case Lx200LinkState.Failed when Connected:
                     Logger.Error("LX200 mount: the link gave up; disconnecting the mount");

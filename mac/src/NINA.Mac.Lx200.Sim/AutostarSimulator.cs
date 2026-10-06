@@ -188,6 +188,29 @@ namespace NINA.Mac.Lx200.Sim {
             }
         }
 
+        /// <summary>
+        /// The mount switched off and on: as <see cref="PowerCycle"/>, and it also forgets the session. Every motion stops; the
+        /// coordinate format, High Precision pointing, the guide rate and the focus speed are back at their power-on values; the
+        /// alignment is lost (":GW#" ends in '0'). Site and clock survive, as the Autostar keeps them. The cable is left as it is.
+        /// </summary>
+        public void SwitchOffAndOn() {
+            lock (state) {
+                Advance(o.UtcNow());
+                silent = false;
+                garbled = false;
+                slew = null;
+                motions.Clear();
+                focusMove = null;
+                longFormat = o.StartInLongFormat;
+                hpPointing = o.HighPrecisionPointing;
+                alignChar = '0';
+                guideRateArcsecPerSec = o.GuideRateArcsecPerSec;
+                moveRateDegPerSec = guideRateArcsecPerSec / 3600.0;
+                focusSpeed = Math.Clamp(o.FocusSpeedAtStart, 1, 4);
+                busyUntil = default;
+            }
+        }
+
         public void Dispose() {
             if (disposed) {
                 return;
@@ -264,7 +287,8 @@ namespace NINA.Mac.Lx200.Sim {
                 }
                 commandCount++;
                 nak = (o.NakEveryNth > 0 && commandCount % o.NakEveryNth == 0) || (o.NakWhileBusy && now < busyUntil)
-                    || (o.HaltsNaked && body is "Q" or "Qn" or "Qs" or "Qe" or "Qw" or "FQ");
+                    || (o.HaltsNaked && body is "Q" or "Qn" or "Qs" or "Qe" or "Qw" or "FQ")
+                    || o.NakWhen?.Invoke(text) == true;
             }
             Record(text, nak);
             if (nak) {

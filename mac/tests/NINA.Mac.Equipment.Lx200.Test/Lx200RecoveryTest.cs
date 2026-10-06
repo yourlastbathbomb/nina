@@ -92,6 +92,37 @@ namespace NINA.Mac.Equipment.Lx200.Test {
         }
 
         [Test]
+        public async Task MountSwitchedOffAndOnWhileTheCableWasOut_TheConnectChecksRunAgain_AndALostAlignmentStopsGotos() {
+            using var rig = new Rig(new SimOptions { HighPrecisionPointing = true, SlewSeconds = 0.8, PlanetaryUpdateSeconds = 0.2 },
+                                    configure: s => s.GuideRateArcsecPerSec = 12.0);
+            var mount = await rig.ConnectTelescope();
+            rig.Sim.LongFormat.Should().BeTrue();
+            rig.Sim.HighPrecisionPointing.Should().BeFalse();
+            rig.Sim.GuideRateArcsecPerSec.Should().Be(12.0);
+            mount.IsAligned.Should().BeTrue();
+            using var notes = Rig.CaptureNotifications();
+
+            rig.Cable.Unplug();
+            (await Rig.Eventually(() => mount.LinkState == Lx200LinkState.Reconnecting, TimeSpan.FromSeconds(3))).Should().BeTrue();
+            rig.Sim.SwitchOffAndOn();
+            rig.Sim.LongFormat.Should().BeFalse("a mount switched on starts in the short format");
+            rig.Cable.Replug();
+            (await Rig.Eventually(() => mount.LinkState == Lx200LinkState.Connected, TimeSpan.FromSeconds(5))).Should().BeTrue();
+
+            (await Rig.Eventually(() => rig.Sim.LongFormat && !rig.Sim.HighPrecisionPointing && rig.Sim.GuideRateArcsecPerSec == 12.0, TimeSpan.FromSeconds(5)))
+                .Should().BeTrue("the format, High Precision pointing and the guide rate are set again after the reconnect");
+            (await Rig.Eventually(() => mount.IsAligned == false, TimeSpan.FromSeconds(5))).Should().BeTrue();
+            (await Rig.Eventually(() => notes.Posted.Any(n => n.Kind == NotificationKind.Error && n.Message.Contains("no longer aligned")), TimeSpan.FromSeconds(2)))
+                .Should().BeTrue("a lost alignment is reported");
+            mount.Connected.Should().BeTrue();
+            var received = rig.Received.Count;
+            var (ra, dec) = rig.Sim.BelievedRaDec;
+            (await mount.SlewToCoordinates(new Coordinates(Angle.ByHours(ra), Angle.ByDegree(dec + 1), Epoch.JNOW), CancellationToken.None))
+                .Should().BeFalse("every goto of a mount that lost its alignment would be wrong");
+            rig.Received.Skip(received).Should().NotContain(c => c == ":MS#" || c == ":MA#");
+        }
+
+        [Test]
         public async Task CableNeverComesBack_TheDevicesDisconnect_AfterTheGiveUpTime() {
             using var rig = new Rig(linkOptions: new Lx200LinkOptions {
                 ReconnectInterval = TimeSpan.FromMilliseconds(100),

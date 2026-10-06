@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Milestone M7: NINA's advanced sequencer run headless on macOS for this rig. Fork-only code that sits on top of the upstream
+    engine (NINA.Sequencer.Mac, NINA.WPF.Base.Mac and the other engine projects):
+    - Catalogue/: the static catalogue of the rig's sequence entities (in place of the plugin loader's MEF composition and its
+      WPF resource dictionaries) and the headless ISequencerFactory the JSON converters clone from;
+    - Headless/: the composition root (mediators, upstream device view models, imaging and image saving, symbol broker) and the
+      headless stand-ins for NINA's UI view models (image control, statistics, history, status, null framing/planetarium);
+    - Conditions/: MaxAltitudeCondition, the zenith-keyhole stop NINA lacks (alt-az mount);
+    - FieldRotation/: the field-rotation symbols (FieldRotation_MaxSub, ...) from NINA.Mac.RigTools' maths;
+    - Planning/: the Target form model (TargetPlan, NightPlan), the plan-to-sequence-tree generator and the plan validator;
+    - Runner/: validation without message boxes and a headless start of NINA's Sequencer.
+    Two upstream NINA (app) files are linked unchanged: ViewModel/ImagingVM.cs (capture, metadata, prepare) and
+    ViewModel/ImageSaveController.cs (the save queue and its events). See ../README-engine.md (NINA.Sequencer).
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Mac.Sequencing</AssemblyName>
+    <RootNamespace>NINA.Mac.Sequencing</RootNamespace>
+    <!-- Engine.props turns assembly-info generation off for upstream projects; this fork assembly has its own attributes -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Engine.props links upstream's CommonAssemblyInfo.cs (version 3.3.0.x); this assembly takes the SDK default version instead -->
+    <Compile Remove="$(NinaRoot)CommonAssemblyInfo.cs" />
+
+    <!-- Upstream NINA (app) view models that are not WPF: linked unchanged -->
+    <Compile Include="$(NinaRoot)NINA/ViewModel/ImagingVM.cs" Link="Upstream/NINA/ViewModel/ImagingVM.cs" />
+    <Compile Include="$(NinaRoot)NINA/ViewModel/ImageSaveController.cs" Link="Upstream/NINA/ViewModel/ImageSaveController.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.Sequencer.Test" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Sequencer.Mac/NINA.Sequencer.Mac.csproj" />
+    <ProjectReference Include="../NINA.WPF.Base.Mac/NINA.WPF.Base.Mac.csproj" />
+    <ProjectReference Include="../NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <!-- Field-rotation and frame maths (no NINA dependencies) -->
+    <ProjectReference Include="../NINA.Mac.RigTools/NINA.Mac.RigTools.csproj" />
+    <!-- MaxAltitudeCondition is a [UsesExpressions] entity: the generator writes its Clone, expression properties and validation -->
+    <ProjectReference Include="../NINA.Sequencer.Generators.Mac/NINA.Sequencer.Generators.Mac.csproj" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+</Project>

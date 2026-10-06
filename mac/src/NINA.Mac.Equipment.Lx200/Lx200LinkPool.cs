@@ -33,10 +33,13 @@ namespace NINA.Mac.Equipment.Lx200 {
         private readonly object sync = new();
 
         /// <param name="openerFor">Transport opener for a port path; default: <see cref="Lx200Serial.Open"/> (9600 8N1, no handshake).</param>
-        /// <param name="optionsFactory">Options for a new link; default: trace files in NINA's log folder (Logs/lx200).</param>
+        /// <param name="optionsFactory">Options for a new link; default: trace files in NINA's log folder (Logs/lx200), and the device node watched while idle.</param>
         public Lx200LinkPool(Func<string, Func<Lx200Trace, ILx200Transport>> openerFor = null, Func<Lx200LinkOptions> optionsFactory = null) {
             this.openerFor = openerFor ?? (port => trace => Lx200Serial.Open(port, trace));
-            this.optionsFactory = optionsFactory ?? (() => new Lx200LinkOptions { TraceDirectory = Path.Combine(CoreUtil.APPLICATIONTEMPPATH, "Logs", "lx200") });
+            this.optionsFactory = optionsFactory ?? (() => new Lx200LinkOptions {
+                TraceDirectory = Path.Combine(CoreUtil.APPLICATIONTEMPPATH, "Logs", "lx200"),
+                WatchPortNode = true
+            });
         }
 
         /// <summary>The pool the devices use unless they are given another one.</summary>

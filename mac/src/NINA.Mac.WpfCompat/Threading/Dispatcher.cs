@@ -86,6 +86,21 @@ namespace System.Windows.Threading {
             return BeginInvokeCore(priority, method, null);
         }
 
+        /// <summary>WPF's InvokeAsync at Normal priority: queued like <see cref="BeginInvoke(Delegate, object[])"/>.</summary>
+        public DispatcherOperation InvokeAsync(Action callback) {
+            return InvokeAsync(callback, DispatcherPriority.Normal, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// WPF's InvokeAsync: queued like <see cref="BeginInvoke(Delegate, object[])"/>. If <paramref name="cancellationToken"/>
+        /// is cancelled before the callback starts, the operation is aborted and its <see cref="DispatcherOperation.Task"/> is
+        /// cancelled, as in WPF; once it has started it runs to completion.
+        /// </summary>
+        public DispatcherOperation InvokeAsync(Action callback, DispatcherPriority priority, CancellationToken cancellationToken) {
+            ArgumentNullException.ThrowIfNull(callback);
+            return BeginInvokeCore(priority, callback, null, cancellationToken);
+        }
+
         private static SynchronizationContext LoopOf(SynchronizationContext context) {
             return context is DispatcherSynchronizationContext ? null : context;
         }
@@ -134,10 +149,10 @@ namespace System.Windows.Threading {
             return result;
         }
 
-        internal DispatcherOperation BeginInvokeCore(DispatcherPriority priority, Delegate method, object[] args) {
+        internal DispatcherOperation BeginInvokeCore(DispatcherPriority priority, Delegate method, object[] args, CancellationToken cancellationToken = default) {
             ArgumentNullException.ThrowIfNull(method);
             ValidatePriority(priority);
-            var operation = new DispatcherOperation(this, priority, method, args);
+            var operation = new DispatcherOperation(this, priority, method, args, cancellationToken);
             var context = loop;
             if (context != null) {
                 context.Post(_ => operation.Run(), null);
@@ -252,11 +267,14 @@ namespace System.Windows.Threading {
         private readonly object[] args;
         private readonly TaskCompletionSource<object> completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        internal DispatcherOperation(Dispatcher dispatcher, DispatcherPriority priority, Delegate method, object[] args) {
+        private readonly CancellationToken cancellationToken;
+
+        internal DispatcherOperation(Dispatcher dispatcher, DispatcherPriority priority, Delegate method, object[] args, CancellationToken cancellationToken = default) {
             Dispatcher = dispatcher;
             Priority = priority;
             this.method = method;
             this.args = args;
+            this.cancellationToken = cancellationToken;
         }
 
         public Dispatcher Dispatcher { get; }
@@ -275,6 +293,12 @@ namespace System.Windows.Threading {
         }
 
         internal void Run() {
+            if (cancellationToken.IsCancellationRequested) {
+                // InvokeAsync with a cancelled token: WPF aborts the operation before it runs
+                status = DispatcherOperationStatus.Aborted;
+                completion.SetCanceled(cancellationToken);
+                return;
+            }
             status = DispatcherOperationStatus.Executing;
             try {
                 var result = Dispatcher.Execute(method, args);

@@ -93,7 +93,13 @@ namespace NINA.Sequencer.Trigger.Platesolving {
         private CenterAfterDriftTrigger(CenterAfterDriftTrigger cloneMe) : this(cloneMe.profileService, cloneMe.telescopeMediator, cloneMe.filterWheelMediator, cloneMe.guiderMediator,
             cloneMe.imagingMediator, cloneMe.cameraMediator, cloneMe.domeMediator, cloneMe.domeFollower, cloneMe.imageSaveMediator, cloneMe.applicationStatusMediator, cloneMe.safetyMonitorMediator) {
             CopyMetaData(cloneMe);
+            CenteringPlateSolverFactory = cloneMe.CenteringPlateSolverFactory;
+            CenteringWindowServiceFactory = cloneMe.CenteringWindowServiceFactory;
         }
+
+        // Factories for the centring run in Execute. Null (always, unless a host without WPF windows sets them) means the ones created there.
+        internal NINA.PlateSolving.Interfaces.IPlateSolverFactory CenteringPlateSolverFactory { get; set; }
+        internal IWindowServiceFactory CenteringWindowServiceFactory { get; set; }
 
         partial void AfterClone(CenterAfterDriftTrigger clone) {
             TriggerRunner = (SequentialContainer)TriggerRunner.Clone();
@@ -139,7 +145,7 @@ namespace NINA.Sequencer.Trigger.Platesolving {
 
         public override async Task Execute(ISequenceContainer context, IProgress<ApplicationStatus> progress, CancellationToken token) {
             var centerSequenceItem = new Center(profileService, telescopeMediator, imagingMediator, filterWheelMediator, guiderMediator, 
-                domeMediator, domeFollower, new PlateSolverFactoryProxy(), new WindowServiceFactory()) {
+                domeMediator, domeFollower, CenteringPlateSolverFactory ?? new PlateSolverFactoryProxy(), CenteringWindowServiceFactory ?? new WindowServiceFactory()) {
                 Coordinates = Coordinates
             };
             await centerSequenceItem.Execute(progress, token);

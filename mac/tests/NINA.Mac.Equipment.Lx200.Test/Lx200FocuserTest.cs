@@ -35,13 +35,28 @@ namespace NINA.Mac.Equipment.Lx200.Test {
 
         private const double UmPerMsAtSpeed2 = 10.0 / 1000.0;
 
-        /// <summary>Milliseconds between a start command and the next ":FQ#" in the simulator's log.</summary>
-        private static double RunMs(Rig rig, string startCommand, int fromLogIndex) {
+        /// <summary>
+        /// Motor time as the driver ran it: milliseconds between a start command and the next ":FQ#" leaving the Mac, on the
+        /// link's monotonic clock (TX trace). This is what the driver controls; the simulator's receive times add the emulated
+        /// cable's thread hops on top.
+        /// </summary>
+        private static double LinkRunMs(Rig rig, string startCommand, DateTime sinceUtc) {
+            var tx = rig.Transmitted().Where(t => t.Utc >= sinceUtc).ToList();
+            var start = tx.First(t => t.Text == startCommand);
+            var stop = tx.First(t => t.Text == ":FQ#" && t.Utc > start.Utc);
+            return (stop.Utc - start.Utc).TotalMilliseconds;
+        }
+
+        /// <summary>The same interval as the simulated mount received it (its log), for coarse checks only.</summary>
+        private static double SimRunMs(Rig rig, string startCommand, int fromLogIndex) {
             var log = rig.SimLog.Skip(fromLogIndex).ToList();
             var start = log.First(e => e.Command == startCommand);
             var stop = log.First(e => e.Command == ":FQ#" && e.Utc >= start.Utc);
             return (stop.Utc - start.Utc).TotalMilliseconds;
         }
+
+        /// <summary>How far the simulator's receive times may stray from the link's send times: pump threads of the emulated cable, under load.</summary>
+        private const double CableJitterMs = 50;
 
         [Test]
         public async Task Connect_StartsAtHalfOfMaxStep_LocksTheSpeed_AndReadsTheTemperature() {
@@ -66,6 +81,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             var focuser = await rig.ConnectFocuser();
             var um0 = rig.Sim.FocuserPositionUm;
             var log = rig.SimLog.Count;
+            var asked = rig.Link.UtcNow;
 
             var move = focuser.Move(focuser.Position + 800, CancellationToken.None);
             (await Rig.Eventually(() => focuser.IsMoving, TimeSpan.FromSeconds(1))).Should().BeTrue();
@@ -75,9 +91,11 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             focuser.IsMoving.Should().BeFalse();
             var commands = rig.SimLog.Skip(log).Select(e => e.Command).ToList();
             commands.Should().ContainInOrder(":F2#", ":F-#", ":FQ#", ":FQ#");
-            var ran = RunMs(rig, ":F-#", log);
+            var ran = LinkRunMs(rig, ":F-#", asked);
             ran.Should().BeInRange(795, 830, "800 ms of motor time");
-            (rig.Sim.FocuserPositionUm - um0).Should().BeApproximately(ran * UmPerMsAtSpeed2, 0.05, "the drawtube went outward for that long");
+            var simRan = SimRunMs(rig, ":F-#", log);
+            simRan.Should().BeApproximately(ran, CableJitterMs, "the mount saw the same interval, give or take the emulated cable");
+            (rig.Sim.FocuserPositionUm - um0).Should().BeApproximately(simRan * UmPerMsAtSpeed2, 0.05, "the drawtube went outward for as long as the simulated motor ran");
             focuser.History.Last().RanMs.Should().BeApproximately(800, 30);
         }
 
@@ -122,14 +140,16 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             using var rig = new Rig();
             var focuser = await rig.ConnectFocuser();
             var log = rig.SimLog.Count;
+            var asked = rig.Link.UtcNow;
 
             var move = focuser.Move(focuser.Position + 5000, CancellationToken.None);
             await Task.Delay(600);
             focuser.Halt();
             await move.WaitAsync(TimeSpan.FromSeconds(2));
 
-            var ran = RunMs(rig, ":F-#", log);
+            var ran = LinkRunMs(rig, ":F-#", asked);
             ran.Should().BeInRange(450, 650, "halted about 600 ms after the move was asked for (the speed command and the start went first)");
+            SimRunMs(rig, ":F-#", log).Should().BeApproximately(ran, CableJitterMs);
             focuser.Position.Should().BeCloseTo(32500 + (int)Math.Round(ran), 5);
             focuser.History.Last().Completed.Should().BeFalse();
             rig.Sim.FocuserMoving.Should().BeFalse();
@@ -153,14 +173,18 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             using var rig = new Rig(configure: s => s.FocuserBacklashMs = 150);
             var focuser = await rig.ConnectFocuser();
             var log = rig.SimLog.Count;
+            var first = rig.Link.UtcNow;
 
             await focuser.Move(32800, CancellationToken.None);
             var reversal = rig.SimLog.Count;
+            var second = rig.Link.UtcNow;
             await focuser.Move(32500, CancellationToken.None);
 
             focuser.Position.Should().Be(32500);
-            RunMs(rig, ":F-#", log).Should().BeInRange(295, 330, "the first move has no reversal");
-            RunMs(rig, ":F+#", reversal).Should().BeInRange(445, 480, "300 ms plus 150 ms of backlash");
+            LinkRunMs(rig, ":F-#", first).Should().BeInRange(295, 330, "the first move has no reversal");
+            LinkRunMs(rig, ":F+#", second).Should().BeInRange(445, 480, "300 ms plus 150 ms of backlash");
+            SimRunMs(rig, ":F-#", log).Should().BeApproximately(LinkRunMs(rig, ":F-#", first), CableJitterMs);
+            SimRunMs(rig, ":F+#", reversal).Should().BeApproximately(LinkRunMs(rig, ":F+#", second), CableJitterMs);
             focuser.History.Select(h => h.RequestedMs).Should().Equal(300, 450);
         }
 
@@ -199,11 +223,11 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             var start = tx.First(t => t.Text == ":F-#");
             var halt = tx.First(t => t.Text == ":FQ#" && t.Utc > start.Utc);
             var sent = (halt.Utc - start.Utc).TotalMilliseconds;
-            // at the mount (the simulator's receive times; the emulated cable adds a few ms of sleep jitter)
-            var ran = RunMs(rig, ":F-#", log);
+            // at the mount (the simulator's receive times; the emulated cable adds its pump threads' jitter)
+            var ran = SimRunMs(rig, ":F-#", log);
             TestContext.Out.WriteLine(string.Create(CultureInfo.InvariantCulture, $"400 ms move under 100 ms polling at 9600 baud: halt sent {sent:0.0} ms after the start, mount saw {ran:0.0} ms"));
             sent.Should().BeInRange(399, 415, "the halt is a timed transaction: polls cannot delay it");
-            ran.Should().BeApproximately(400, 20);
+            ran.Should().BeApproximately(sent, CableJitterMs, "the mount saw the same interval, give or take the emulated cable");
             rig.SimLog.Skip(log).Should().Contain(e => e.Command == ":GR#", "the mount kept being polled meanwhile");
 
             rig.Telescope.Disconnect();
@@ -219,6 +243,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             var focuser = await rig.ConnectFocuser();
             using var notes = Rig.CaptureNotifications();
             var log = rig.SimLog.Count;
+            var asked = rig.Link.UtcNow;
 
             var move = focuser.Move(focuser.Position + 5000, CancellationToken.None);
             await Task.Delay(400);
@@ -229,8 +254,9 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             await move.WaitAsync(TimeSpan.FromSeconds(6));
 
             rig.Sim.FocuserMoving.Should().BeFalse("the owed ':FQ#' went out first after the reconnect");
-            var ran = RunMs(rig, ":F-#", log);
+            var ran = LinkRunMs(rig, ":F-#", asked);   // from the start to the owed ':FQ#' sent after the reconnect
             ran.Should().BeInRange(1100, 2500);
+            SimRunMs(rig, ":F-#", log).Should().BeApproximately(ran, CableJitterMs);
             focuser.Position.Should().BeCloseTo(32500 + (int)Math.Round(ran), 60, "the position counts the time until the owed halt");
             focuser.History.Last().Completed.Should().BeFalse();
             notes.Posted.Should().Contain(n => n.Message.Contains("position is an estimate"));

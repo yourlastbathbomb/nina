@@ -35,6 +35,13 @@ namespace NINA.Mac.Lx200 {
         /// </summary>
         public TimeSpan NakWindow { get; set; } = TimeSpan.FromMilliseconds(60);
 
+        /// <summary>
+        /// NAK window for halts (":Q#", ":Qn#", ":FQ#", <see cref="CommandEffect.Halt"/>); null uses <see cref="NakWindow"/>. A
+        /// refused halt must not pass as accepted, and nothing timing-critical waits behind a halt, so a caller that shortens
+        /// <see cref="NakWindow"/> for host-timed motion starts can keep a long window here.
+        /// </summary>
+        public TimeSpan? HaltNakWindow { get; set; }
+
         /// <summary>Wait for an optional '#' after fixed-length replies (":GW#", ":GH#", ":P#").</summary>
         public TimeSpan OptionalTerminatorGrace { get; set; } = TimeSpan.FromMilliseconds(120);
 
@@ -108,7 +115,16 @@ namespace NINA.Mac.Lx200 {
         public Lx200Reply Send(string command, ReplyShape shape = null, TimeSpan? timeout = null) =>
             Send(Lx200Command.Parse(command), shape, timeout);
 
-        public Lx200Reply Send(Lx200Command command, ReplyShape shape = null, TimeSpan? timeout = null) {
+        public Lx200Reply Send(Lx200Command command, ReplyShape shape = null, TimeSpan? timeout = null) =>
+            Send(command, shape, timeout, nakReturnsAtOnce: false);
+
+        /// <summary>
+        /// One transaction. With <paramref name="nakReturnsAtOnce"/> a NAK (0x15, busy) ends it at once with
+        /// <see cref="ReplyStatus.Nak"/>: no retry, no wait and no resync (a NAK is a well-formed answer), so a caller that
+        /// schedules other work can retry later itself instead of holding the link for <see cref="Lx200ConnectionOptions.NakRetries"/>
+        /// x <see cref="Lx200ConnectionOptions.NakRetryDelay"/>.
+        /// </summary>
+        public Lx200Reply Send(Lx200Command command, ReplyShape shape, TimeSpan? timeout, bool nakReturnsAtOnce) {
             ArgumentNullException.ThrowIfNull(command);
             if (command.Spec?.IsBlocked == true) {
                 Trace.Log(TraceKind.Error, ReadOnlySpan<byte>.Empty, $"REFUSED {command.Text} (blocklist, nothing written): {command.Spec.BlockedReason}");
@@ -120,13 +136,14 @@ namespace NINA.Mac.Lx200 {
             lock (sync) {
                 var reply = new Lx200Reply(command, shape);
                 try {
-                    Transact(command, shape, limit, reply);
+                    Transact(command, shape, limit, reply, nakReturnsAtOnce ? 0 : Options.NakRetries);
                 } catch (Lx200DisconnectedException ex) {
                     reply.Status = ReplyStatus.Disconnected;
                     reply.Error = ex.Message;
                     Trace.Log(TraceKind.Error, ReadOnlySpan<byte>.Empty, $"{command.Text}: disconnected: {ex.Message}");
                 }
-                if (!reply.IsOk && reply.Status != ReplyStatus.Disconnected && Options.ResyncOnFailure && transport.IsOpen) {
+                if (!reply.IsOk && reply.Status != ReplyStatus.Disconnected && !(nakReturnsAtOnce && reply.Status == ReplyStatus.Nak)
+                    && Options.ResyncOnFailure && transport.IsOpen) {
                     try {
                         reply.Resynced = ResyncCore();
                     } catch (Lx200DisconnectedException ex) {
@@ -230,7 +247,7 @@ namespace NINA.Mac.Lx200 {
             }
         }
 
-        private void Transact(Lx200Command command, ReplyShape shape, TimeSpan limit, Lx200Reply reply) {
+        private void Transact(Lx200Command command, ReplyShape shape, TimeSpan limit, Lx200Reply reply, int nakRetries) {
             if (lastEnd != TimeSpan.MinValue) {
                 var gapLeft = Options.MinimumGap - (clock.Elapsed - lastEnd);
                 if (gapLeft > TimeSpan.Zero) {
@@ -241,6 +258,7 @@ namespace NINA.Mac.Lx200 {
             var raw = new List<byte>();
             var parts = new List<string>();
             var trailing = new List<byte>();
+            var nakWindow = command.Effect == CommandEffect.Halt && Options.HaltNakWindow is { } haltWindow ? haltWindow : Options.NakWindow;
             for (var attempt = 0; ; attempt++) {
                 var old = transport.DrainAvailable();
                 if (old.Length > 0) {
@@ -257,15 +275,15 @@ namespace NINA.Mac.Lx200 {
                 raw.Clear();
                 parts.Clear();
                 trailing.Clear();
-                var reader = new ReplyReader(transport, sw, limit, Options);
+                var reader = new ReplyReader(transport, sw, limit, Options, nakWindow);
                 var status = reader.Read(shape, raw, parts, trailing);
                 reply.FirstByteMs = reader.FirstByteMs;
                 reply.TerminatorSeen = reader.TerminatorSeen;
                 reply.TotalMs = sw.Elapsed.TotalMilliseconds;
                 if (status == ReplyStatus.Nak) {
                     reply.NakCount++;
-                    if (attempt < Options.NakRetries) {
-                        Trace.Note($"{command.Text}: NAK (0x15, mount busy) - retry {attempt + 1}/{Options.NakRetries} in {Options.NakRetryDelay.TotalMilliseconds:0} ms");
+                    if (attempt < nakRetries) {
+                        Trace.Note($"{command.Text}: NAK (0x15, mount busy) - retry {attempt + 1}/{nakRetries} in {Options.NakRetryDelay.TotalMilliseconds:0} ms");
                         Thread.Sleep(Options.NakRetryDelay);
                         continue;
                     }
@@ -326,12 +344,14 @@ namespace NINA.Mac.Lx200 {
             private readonly Stopwatch sw;
             private readonly TimeSpan limit;
             private readonly Lx200ConnectionOptions options;
+            private readonly TimeSpan nakWindow;
 
-            public ReplyReader(ILx200Transport transport, Stopwatch sw, TimeSpan limit, Lx200ConnectionOptions options) {
+            public ReplyReader(ILx200Transport transport, Stopwatch sw, TimeSpan limit, Lx200ConnectionOptions options, TimeSpan nakWindow) {
                 this.transport = transport;
                 this.sw = sw;
                 this.limit = limit;
                 this.options = options;
+                this.nakWindow = nakWindow;
             }
 
             public double FirstByteMs { get; private set; } = double.NaN;
@@ -342,7 +362,7 @@ namespace NINA.Mac.Lx200 {
 
             public ReplyStatus Read(ReplyShape shape, List<byte> raw, List<string> parts, List<byte> trailing) {
                 if (shape.Kind == ReplyKind.None) {
-                    var b = Next(options.NakWindow);
+                    var b = Next(nakWindow);
                     if (b < 0) {
                         return ReplyStatus.NoReplyExpected;
                     }

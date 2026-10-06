@@ -194,6 +194,15 @@ namespace NINA.Mac.Equipment.Lx200 {
             set => store.SetValueDouble(nameof(SoftParkAzimuth), value);
         }
 
+        /// <summary>
+        /// The driver soft-parked the mount and nothing has unparked it since; kept in the profile, so a reconnect (or the next
+        /// session) still reports AtPark and NINA's Unpark resumes tracking. Written by the driver.
+        /// </summary>
+        public bool SoftParked {
+            get => store.GetValueBoolean(nameof(SoftParked), false);
+            set => store.SetValueBoolean(nameof(SoftParked), value);
+        }
+
         // ---- Focuser ----------------------------------------------------------------------------------------
 
         /// <summary>

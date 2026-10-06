@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The slice of upstream NINA.WPF.Base that the headless sequencer needs (mac/docs/m7-headless-sequencer-plan.md section 1.3),
+    compiled for net10.0 / osx-arm64. Like NINA.Equipment.Mac this is an opt-in include list: nothing is globbed from the upstream
+    root, so the views, behaviours, sky survey, framing, autofocus VMs and every vendor chooser stay out without anyone having to
+    notice when upstream adds more. Upstream files are linked unchanged; Replaced/ holds the one reduced interface.
+    The folder is declared as WpfBaseUpstreamDir, not UpstreamDir: the WPF-only packages (Extended WPF Toolkit, WebView2,
+    Xaml.Behaviors, OxyPlot.Wpf/Contrib) are dropped on purpose, which UpstreamParityTest would reject.
+    See ../README-engine.md (NINA.Sequencer).
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.WPF.Base</AssemblyName>
+    <RootNamespace>NINA.WPF.Base</RootNamespace>
+    <WpfBaseUpstreamDir>$(NinaRoot)NINA.WPF.Base/</WpfBaseUpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Assembly attributes (title, COM visibility, GUID); CommonAssemblyInfo.cs comes from Engine.props -->
+    <Compile Include="$(WpfBaseUpstreamDir)Properties/AssemblyInfo.cs" LinkBase="Upstream/Properties" />
+
+    <!-- Mediator and view-model contracts the sequencer and the device view models use -->
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/Mediator/*.cs" LinkBase="Upstream/Interfaces/Mediator" />
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/ViewModel/IApplicationStatusVM.cs" LinkBase="Upstream/Interfaces/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/ViewModel/IApplicationVM.cs" LinkBase="Upstream/Interfaces/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/ViewModel/IImageHistoryVM.cs" LinkBase="Upstream/Interfaces/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/ViewModel/IImageSaveController.cs" LinkBase="Upstream/Interfaces/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)Interfaces/ViewModel/IImageStatisticsVM.cs" LinkBase="Upstream/Interfaces/ViewModel" />
+    <!-- IFramingAssistantVM.cs is replaced by Replaced/IFramingAssistantVM.cs (SetCoordinates only; the rest needs SkySurvey and GDI+) -->
+
+    <!-- The 16 thin mediators -->
+    <Compile Include="$(WpfBaseUpstreamDir)Mediator/*.cs" LinkBase="Upstream/Mediator" />
+
+    <!-- View-model bases, the plate-solve status the Center items report into, the image-history row -->
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/BaseVM.cs" LinkBase="Upstream/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/DockableVM.cs" LinkBase="Upstream/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/PlateSolvingStatusVM.cs" LinkBase="Upstream/ViewModel" />
+    <Compile Include="$(WpfBaseUpstreamDir)Model/ImageHistoryPoint.cs" LinkBase="Upstream/Model" />
+
+    <!-- MvvmLight RelayCommand (the sequencer's entity commands) and the autofocus report types IImageHistoryVM carries -->
+    <Compile Include="$(WpfBaseUpstreamDir)Utility/MVVMLight/*.cs" LinkBase="Upstream/Utility/MVVMLight" />
+    <Compile Include="$(WpfBaseUpstreamDir)Utility/AutoFocus/*.cs" LinkBase="Upstream/Utility/AutoFocus" />
+
+    <!-- The device view models that serve the mediators: the same code Windows NINA runs between the sequencer and the drivers -->
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/Equipment/Camera/CameraVM.cs" LinkBase="Upstream/ViewModel/Equipment/Camera" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/Equipment/Telescope/TelescopeVM.cs" LinkBase="Upstream/ViewModel/Equipment/Telescope" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/Equipment/Telescope/TelescopeSlewCoordinates.cs" LinkBase="Upstream/ViewModel/Equipment/Telescope" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/Equipment/Telescope/TelescopeLatLongSyncVM.cs" LinkBase="Upstream/ViewModel/Equipment/Telescope" />
+    <Compile Include="$(WpfBaseUpstreamDir)ViewModel/Equipment/Guider/GuiderVM.cs" LinkBase="Upstream/ViewModel/Equipment/Guider" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+  </ItemGroup>
+
+  <!-- Upstream's packages at upstream's versions, minus the WPF-only ones (see the comment at the top) -->
+  <ItemGroup>
+    <PackageReference Include="AsyncEnumerator" Version="4.0.2" />
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
+    <PackageReference Include="Nito.Mvvm.Async" Version="1.0.0-pre-04" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

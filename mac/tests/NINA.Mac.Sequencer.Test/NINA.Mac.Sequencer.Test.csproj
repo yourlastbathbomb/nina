@@ -1,0 +1,132 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NINA's advanced sequencer on macOS (milestone M7):
+    - Mac/: the static catalogue and its merge guards, the headless factory, JSON round trips and the bundled templates,
+      MaxAltitudeCondition, the field-rotation symbols, the Target form generator and validator, the WpfCompat runtime stand-ins
+      the sequencer relies on, and simulated nights: generated sequences run end to end through NINA's own Sequencer against a
+      simulated camera, mount and plate solver (Mac/Sim/), writing FITS files through NINA's file patterns into a temp folder
+      and stopping at the horizon, at the maximum altitude and at dawn. A camera test is [Explicit] (Category Hardware).
+    - Upstream/: NINA.Test/Sequencer fixtures linked unchanged where the headless build has what they test.
+    See ../../src/README-engine.md (NINA.Sequencer).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Sequencer.Test</RootNamespace>
+    <!-- NINA.Sequencer.Mac's Mac/AssemblyInfo.Mac.cs and NINA.Mac.Sequencing grant this assembly access to internals -->
+    <AssemblyName>NINA.Mac.Sequencer.Test</AssemblyName>
+    <!-- As NINA.Test.csproj, so the linked upstream fixtures compile exactly as they do on Windows -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../../src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../../src/Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.WPF.Base.Mac/NINA.WPF.Base.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Sequencer.Mac/NINA.Sequencer.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Sequencer.Generators.Mac/NINA.Sequencer.Generators.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.Sequencing/NINA.Mac.Sequencing.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.RigTools/NINA.Mac.RigTools.csproj" />
+    <!-- The M4 LX200GPS driver and the Autostar simulator, for the night that runs through the real driver (Mac/Lx200NightTest) -->
+    <ProjectReference Include="../../src/NINA.Mac.Equipment.Lx200/NINA.Mac.Equipment.Lx200.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.Lx200.Sim/NINA.Mac.Lx200.Sim.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NinaRoot</_Parameter1>
+      <_Parameter2>$(NinaRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- The independent FITS reader of NINA.Mac.Image.Test (shares no code with NINA), to read back the files a sequence writes, and
+       NINA.Mac.Equipment.Lx200.Test's in-memory cable to the Autostar simulator (both linked read-only) -->
+  <ItemGroup>
+    <Compile Include="../NINA.Mac.Image.Test/Mac/FitsFile.cs" Link="Mac/Linked/FitsFile.cs" />
+    <Compile Include="../NINA.Mac.Equipment.Lx200.Test/SimCable.cs" Link="Mac/Linked/SimCable.cs" />
+  </ItemGroup>
+
+  <!-- Upstream NINA.Test fixtures, linked unchanged -->
+  <PropertyGroup>
+    <UpstreamTests>$(NinaRoot)NINA.Test/</UpstreamTests>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- global using NUnit.Framework, plus the SetUpFixture that preloads the natives (DllLoader is a no-op off Windows) -->
+    <Compile Include="$(UpstreamTests)Usings.cs" Link="Upstream/Usings.cs" />
+    <Compile Include="$(UpstreamTests)Sequencer/**/*.cs" LinkBase="Upstream/Sequencer" />
+
+    <!-- The sequencer editor's WPF views, behaviours and converters: not compiled on macOS -->
+    <Compile Remove="$(UpstreamTests)Sequencer/Behaviors/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/View/**" />
+
+    <!-- Entities NINA.Sequencer.Mac leaves out (see its csproj): meridian flip, autofocus, dome, rotator, switch, safety monitor,
+         focuser items, guiding beyond the mount dither, flat-panel training and sky flats, UI-only and Windows-only items -->
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/MeridianFlip/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Autofocus/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/Autofocus/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Dome/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/Dome/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Rotator/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Platesolving/CenterAndRotateTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Platesolving/SolveAndRotateTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Switch/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/SafetyMonitor/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/SafetyMonitor/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Conditions/SafetyMonitorConditionTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Focuser/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Guider/StartGuidingTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Guider/StopGuidingTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/Guider/RestoreGuidingTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/FlatDevice/AutoBrightnessFlatTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/FlatDevice/SkyFlatTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/FlatDevice/SkyFlatExposureDeterminationTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/FlatDevice/TrainedFlatExposureTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Imaging/TakeSubframeExposureTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Telescope/FindHomeTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Utility/LoadImagingLayoutTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Utility/LoadImagingLayoutDataTemplateTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Utility/MessageBoxTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Trigger/Utility/CustomTriggerTest.cs" />
+    <!-- Tests the connect items together with SwitchProfile, which is left out -->
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/Connect/ConnectEquipmentTest.cs" />
+    <!-- Builds trees with CustomTrigger, CenterAndRotate and TriggerOnUnsafe, all left out -->
+    <Compile Remove="$(UpstreamTests)Sequencer/SequenceItem/CoordinatesInstructionInheritanceTest.cs" />
+    <!-- Enumerates every upstream expression-backed entity, including the ones left out (dome, rotator, switch, autofocus) -->
+    <Compile Remove="$(UpstreamTests)Sequencer/ExpressionBackedEntityContractTest.cs" />
+    <!-- Composes the whole Windows catalogue through MEF (IAutoFocusVMFactory, IMeridianFlipVMFactory, IOptionsVM, ...) and requires no
+         Unknown entity in the 3.2 corpus; Mac/SequenceJsonTest loads the same corpus with the rig catalogue and pins its Unknown entities -->
+    <Compile Remove="$(UpstreamTests)Sequencer/Serialization/LegacySequenceMigrationCorpusTest.cs" />
+
+    <!-- The editor: WPF controls, bindings, behaviours and dispatchers (the headless build compiles only the WPF-free Editing core) -->
+    <Compile Remove="$(UpstreamTests)Sequencer/Editing/**" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Conditions/AltitudeExpressionLifecycleTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Logic/ExpressionUiSupportTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/TemplateControllerTest.cs" />
+    <!-- Upstream SequencerFactory builds the editor's WPF collection views; the headless build uses HeadlessSequencerFactory -->
+    <Compile Remove="$(UpstreamTests)Sequencer/SequencerFactoryTest.cs" />
+    <!-- Use left-out entities: SaveSequence, TakeSubframeExposure, MeridianFlipTrigger (with IMeridianFlipVMFactory) -->
+    <Compile Remove="$(UpstreamTests)Sequencer/ControllerAdapterTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Logic/ExpressionCultureMigrationTest.cs" />
+    <Compile Remove="$(UpstreamTests)Sequencer/Utility/ItemUtilityTest.cs" />
+    <!-- Binds WPF TextBoxes (SetBinding, Tag) to test the editor's tooltip handler -->
+    <Compile Remove="$(UpstreamTests)Sequencer/Logic/UserSymbolTest.cs" />
+  </ItemGroup>
+
+</Project>

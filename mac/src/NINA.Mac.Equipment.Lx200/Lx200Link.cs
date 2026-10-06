@@ -67,9 +67,14 @@ namespace NINA.Mac.Equipment.Lx200 {
         /// <summary>
         /// Framing options of the protocol library. The driver listens 40 ms for a NAK after a command without a reply (P07:
         /// NAK within 10 ms of the '#', plus up to 16 ms FTDI latency, RIM MNT-24) instead of the bench probe's 60 ms, because
-        /// a host-timed pulse or focus stop cannot go out while that window is open.
+        /// a host-timed pulse or focus stop cannot go out while that window is open. Halts get 150 ms: a refused halt whose NAK
+        /// came late would otherwise count as accepted while the mount keeps moving, and nothing timing-critical waits behind a
+        /// halt.
         /// </summary>
-        public Lx200ConnectionOptions Connection { get; set; } = new Lx200ConnectionOptions { NakWindow = TimeSpan.FromMilliseconds(40) };
+        public Lx200ConnectionOptions Connection { get; set; } = new Lx200ConnectionOptions {
+            NakWindow = TimeSpan.FromMilliseconds(40),
+            HaltNakWindow = TimeSpan.FromMilliseconds(150)
+        };
 
         /// <summary>No command or poll starts when a timed transaction is due within this time (a reply at 9600 baud with FTDI latency takes 35-60 ms, RIM Table 5).</summary>
         public TimeSpan TimedGuard { get; set; } = TimeSpan.FromMilliseconds(120);
@@ -91,7 +96,7 @@ namespace NINA.Mac.Equipment.Lx200 {
         /// <summary>Consecutive transactions with no usable reply, after a failed ACK resync each, that count as a lost link (mount switched off, dead cable).</summary>
         public int FailuresBeforeLost { get; set; } = 3;
 
-        /// <summary>A refused halt (NAK) is sent again for this long before the link gives up on it and raises an error.</summary>
+        /// <summary>A refused (NAK) or garbled halt is sent again for this long before the link gives up on it and raises an error.</summary>
         public TimeSpan HaltRetryFor { get; set; } = TimeSpan.FromSeconds(3);
 
         /// <summary>Folder for the byte trace file (one per link); null keeps the trace in memory only.</summary>
@@ -102,6 +107,12 @@ namespace NINA.Mac.Equipment.Lx200 {
 
         /// <summary>Show NINA notifications when the link is lost, restored or given up.</summary>
         public bool ShowNotifications { get; set; } = true;
+
+        /// <summary>
+        /// The link's name is a device node (/dev/cu.usbserial-*): while idle, a node that no longer exists (the USB adapter was
+        /// pulled) counts as a lost link at once, whatever System.IO.Ports reports for the open handle. Set by the default pool.
+        /// </summary>
+        public bool WatchPortNode { get; set; }
     }
 
     /// <summary>
@@ -183,7 +194,10 @@ namespace NINA.Mac.Equipment.Lx200 {
         /// <summary>Raised on a thread-pool thread after every state change.</summary>
         public event Action<Lx200LinkState> StateChanged;
 
-        /// <summary>Halts the link still owes for host-timed motions (":Qn#", ":FQ#"); sent first after a reconnect and on dispose.</summary>
+        /// <summary>
+        /// Halts the link still owes for host-timed motions (":Qn#", ":FQ#"): owed from the moment their start is written until
+        /// a halt is accepted or the start was refused (NAK); sent first after a reconnect and on dispose.
+        /// </summary>
         public IReadOnlyCollection<string> OwedStops {
             get {
                 lock (gate) {
@@ -193,8 +207,8 @@ namespace NINA.Mac.Equipment.Lx200 {
         }
 
         /// <summary>
-        /// When an owed halt (<paramref name="command"/>, e.g. ":FQ#") last went out after a reconnect, on the link clock; null if
-        /// never. A host-timed motion that was running when the link went down really stopped then.
+        /// When the halt <paramref name="command"/> (e.g. ":FQ#") last went out and was accepted, on the link clock; null if never.
+        /// A host-timed motion whose halt was owed (the link went down, or its start was garbled) really stopped then.
         /// </summary>
         public DateTime? OwedStopSentUtc(string command) {
             lock (gate) {
@@ -392,6 +406,7 @@ namespace NINA.Mac.Equipment.Lx200 {
         private void Run() {
             while (true) {
                 Request next = null;
+                List<Request> closingHalts = null;
                 var reconnectNow = false;
                 var portClosed = false;
                 lock (gate) {
@@ -401,7 +416,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                         }
                         var now = UtcNow;
                         if (state == Lx200LinkState.Connected) {
-                            if (connection != null && !connection.IsOpen) {
+                            if (connection != null && (!connection.IsOpen || NodeVanished())) {
                                 portClosed = true;   // the adapter went away while the link was idle
                                 break;
                             }
@@ -422,21 +437,24 @@ namespace NINA.Mac.Equipment.Lx200 {
                         }
                     }
                     if (disposed && next == null && !reconnectNow && !portClosed) {
+                        closingHalts = TakeQueuedHalts();
                         FailAllPending("the LX200 link was closed");
                     }
                 }
                 if (portClosed) {
-                    MarkLost("the port closed");
+                    MarkLost(NodeVanished() ? $"{Name} no longer exists (adapter unplugged)" : "the port closed");
                 } else if (next != null) {
                     Execute(next);
                 } else if (reconnectNow) {
                     TryReconnect();
                 } else {
-                    // disposed: the halts still owed go out before the port closes
+                    // disposed: halts already queued (a StopSlew just before a disconnect) and the halts still owed go out
+                    // before the port closes
                     Lx200Connection conn;
                     lock (gate) {
                         conn = state == Lx200LinkState.Connected ? connection : null;
                     }
+                    SendHaltsOnClose(conn, closingHalts);
                     if (conn != null) {
                         SendOwedStops(conn, "the link is closing");
                     }
@@ -447,6 +465,8 @@ namespace NINA.Mac.Equipment.Lx200 {
 
         /// <summary>How often an idle worker checks that the port is still there.</summary>
         private static readonly TimeSpan IdleCheck = TimeSpan.FromMilliseconds(100);
+
+        private bool NodeVanished() => Options.WatchPortNode && !File.Exists(Name);
 
         /// <summary>Next request in lane order, or null with how long to wait. Called under the lock.</summary>
         private Request Pick(DateTime now, out TimeSpan wait) {
@@ -475,7 +495,12 @@ namespace NINA.Mac.Equipment.Lx200 {
                 wait = Clamp(nextDue.Value - now, TimeSpan.FromMilliseconds(1), Options.TimedGuard);
                 return null;
             }
+            DateTime? retryAt = null;
             for (var node = commands.First; node != null; node = node.Next) {
+                if (node.Value.NotBefore > now) {
+                    retryAt = node.Value.NotBefore;   // NAKed, waiting to retry: the lane keeps its order
+                    break;
+                }
                 if (timed.Count > 0 && IsLong(node.Value)) {
                     continue;
                 }
@@ -484,11 +509,17 @@ namespace NINA.Mac.Equipment.Lx200 {
             }
             if (polls.First != null) {
                 var poll = polls.First.Value;
-                polls.RemoveFirst();
-                return poll;
+                if (poll.NotBefore <= now) {
+                    polls.RemoveFirst();
+                    return poll;
+                }
+                retryAt = retryAt == null || poll.NotBefore < retryAt.Value ? poll.NotBefore : retryAt;
             }
             if (nextDue.HasValue) {
                 wait = Clamp(nextDue.Value - now - Options.TimedGuard, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(500));
+            }
+            if (retryAt.HasValue && retryAt.Value - now < wait) {
+                wait = Clamp(retryAt.Value - now, TimeSpan.FromMilliseconds(1), wait);
             }
             return null;
         }
@@ -505,21 +536,44 @@ namespace NINA.Mac.Equipment.Lx200 {
                 conn = connection;
             }
             if (conn == null) {
+                Owe(request.Command);
                 request.Fail(new Lx200DisconnectedException($"{request.Command.Text}: the LX200 link is down"));
                 return;
             }
+            // A host-timed start (":Mn#", ":F-#") owes its halt from the moment it may reach the mount, not from its reply: when
+            // the reply is lost (the cable goes as the start is written) or garbled, the motion may be running and nothing else
+            // would ever stop it. Only a NAK (the mount refused the start) takes the debt back.
+            var startHalt = HaltOwedBy(request.Command);
+            var alreadyOwed = false;
+            if (startHalt != null) {
+                lock (gate) {
+                    alreadyOwed = !owedStops.Add(startHalt);
+                }
+            }
+            // Commands and polls that the mount refuses (NAK, busy) are retried by the link, 100 ms later as before, but from the
+            // queue: halts and timed sends due meanwhile go first instead of waiting out the retries inside one transaction.
+            var linkRetriesNak = request.Lane is Lx200Lane.Command or Lx200Lane.Poll;
             Lx200Reply reply;
             try {
-                reply = conn.Send(request.Command, request.Shape, request.Timeout);
-            } catch (Exception ex) {
+                reply = conn.Send(request.Command, request.Shape, request.Timeout, linkRetriesNak);
+            } catch (Lx200BlockedCommandException ex) {
                 request.Fail(ex);
+                return;
+            } catch (Exception ex) {
+                // The transport itself failed: a write that timed out (System.IO.Ports on macOS when the far end of the node hung
+                // up) or another I/O error. The port is unusable, so the link is lost and reconnects; a halt becomes owed.
+                var reason = $"{ex.GetType().Name}: {ex.Message}";
+                Trace.Note($"{request.Command.Text}: the transport failed ({reason})");
+                Owe(request.Command);
+                MarkLost(reason);
+                request.Fail(new Lx200DisconnectedException($"{request.Command.Text}: the LX200 link on {Name} was lost ({reason})", ex));
                 return;
             }
             string lostReason = null;
             if (reply.Status == ReplyStatus.Disconnected || (!conn.IsOpen && !reply.IsOk)) {
                 lostReason = reply.Error ?? "the port closed";
             } else {
-                TrackOwedStops(request.Command, reply);
+                TrackHalt(request.Command, reply);
                 if (reply.IsOk || reply.Status == ReplyStatus.Nak || reply.Resynced) {
                     consecutiveFailures = 0;
                 } else if (++consecutiveFailures >= Options.FailuresBeforeLost) {
@@ -527,19 +581,35 @@ namespace NINA.Mac.Equipment.Lx200 {
                 }
             }
             if (lostReason != null) {
+                Owe(request.Command);
                 MarkLost(lostReason);
-                if (request.Lane == Lx200Lane.Stop) {
-                    lock (gate) {
-                        owedStops.Add(request.Command.Text);
-                    }
-                }
                 request.Fail(new Lx200DisconnectedException($"{request.Command.Text}: the LX200 link on {Name} was lost ({lostReason})"));
                 return;
             }
+            if (startHalt != null && reply.Status == ReplyStatus.Nak && !alreadyOwed) {
+                lock (gate) {
+                    owedStops.Remove(startHalt);   // refused (busy): nothing started
+                }
+            }
             if (!conn.IsOpen) {
                 MarkLost("the port closed");   // the reply made it; the port went right after
+            } else if (linkRetriesNak && reply.Status == ReplyStatus.Nak && request.NakRetries < conn.Options.NakRetries) {
+                request.NakRetries++;
+                Trace.Note($"{request.Command.Text}: NAK (0x15, mount busy) - retry {request.NakRetries}/{conn.Options.NakRetries} in {conn.Options.NakRetryDelay.TotalMilliseconds:0} ms, after anything more urgent");
+                lock (gate) {
+                    request.NotBefore = UtcNow + conn.Options.NakRetryDelay;
+                    (request.Lane == Lx200Lane.Command ? commands : polls).AddFirst(request);
+                    Monitor.PulseAll(gate);
+                }
+                return;
+            } else if (startHalt != null && !reply.IsOk && reply.Status != ReplyStatus.Nak) {
+                // a garbled answer (a stray byte in the NAK window): the motion may be running, so it is halted now, first
+                Trace.Note($"{request.Command.Text} answered {reply.Status}: the motion may be running; {startHalt} goes out first");
+                Logger.Warning($"LX200: {request.Command.Text} got an unexpected answer ({reply.Describe()}); halting it with {startHalt}");
+                QueueHaltFirst(startHalt);
             }
-            if (request.Lane == Lx200Lane.Stop && reply.Status == ReplyStatus.Nak) {
+            if (request.Lane == Lx200Lane.Stop && !reply.IsOk) {
+                // a refused (NAK) or garbled halt is sent again; it stays owed until the mount accepts it
                 var now = UtcNow;
                 request.FirstRefusalUtc ??= now;
                 if (now - request.FirstRefusalUtc.Value < Options.HaltRetryFor) {
@@ -550,7 +620,9 @@ namespace NINA.Mac.Equipment.Lx200 {
                     }
                     return;
                 }
-                var message = $"The mount refused the halt {request.Command.Text} (NAK, busy) for {(now - request.FirstRefusalUtc.Value).TotalSeconds:0.0} s: the mount or the focuser may still be moving. Switch the mount off.";
+                var how = reply.Status == ReplyStatus.Nak ? "refused the halt" : $"did not confirm the halt ({reply.Status}) of";
+                var why = reply.Status == ReplyStatus.Nak ? " (NAK, busy)" : "";
+                var message = $"The mount {how} {request.Command.Text}{why} for {(now - request.FirstRefusalUtc.Value).TotalSeconds:0.0} s: the mount or the focuser may still be moving. Switch the mount off.";
                 Trace.Note("HALT REFUSED: " + message);
                 Logger.Error(message);
                 if (Options.ShowNotifications) {
@@ -560,38 +632,100 @@ namespace NINA.Mac.Equipment.Lx200 {
             request.Complete(reply);
         }
 
-        /// <summary>Remembers host-timed motions that still need a halt; forgets them when the halt is accepted.</summary>
-        private void TrackOwedStops(Lx200Command command, Lx200Reply reply) {
-            if (!reply.IsOk) {
+        /// <summary>The halt a host-timed start owes (":Mn#" -> ":Qn#", ":F+#"/":F-#" -> ":FQ#"); null for anything else.</summary>
+        private static string HaltOwedBy(Lx200Command command) {
+            var code = command.Spec?.Code;
+            return code switch {
+                "Mn" or "Ms" or "Me" or "Mw" => $":Q{code[1]}#",
+                "F+" or "F-" => ":FQ#",
+                _ => null
+            };
+        }
+
+        /// <summary>A halt that could not be sent (link down, transport failed) is owed: it goes out first when the mount is back.</summary>
+        private void Owe(Lx200Command command) {
+            if (command.Effect != CommandEffect.Halt) {
                 return;
             }
-            var code = command.Spec?.Code;
             lock (gate) {
-                switch (code) {
-                    case "Mn":
-                    case "Ms":
-                    case "Me":
-                    case "Mw":
-                        owedStops.Add($":Q{code[1]}#");
-                        break;
-                    case "F+":
-                    case "F-":
-                        owedStops.Add(":FQ#");
-                        break;
-                    case "Qn":
-                    case "Qs":
-                    case "Qe":
-                    case "Qw":
-                    case "FQ":
-                        owedStops.Remove(command.Text);
-                        break;
-                    case "Q":
-                        owedStops.Remove(":Q#");
-                        owedStops.Remove(":Qn#");
-                        owedStops.Remove(":Qs#");
-                        owedStops.Remove(":Qe#");
-                        owedStops.Remove(":Qw#");
-                        break;
+                if (owedStops.Add(command.Text)) {
+                    Trace.Note($"{command.Text} owed: it goes out first when the mount answers again");
+                }
+            }
+        }
+
+        /// <summary>Puts <paramref name="halt"/> at the head of the Stop lane (":FQ#" twice, as a single one is sometimes missed). Under no lock.</summary>
+        private void QueueHaltFirst(string halt) {
+            var cmd = Lx200Command.Parse(halt);
+            lock (gate) {
+                var now = UtcNow;
+                for (var i = halt == ":FQ#" ? 2 : 1; i > 0; i--) {
+                    stops.AddFirst(new Request(cmd, Lx200Lane.Stop, null, null, null, CancellationToken.None, now, now));
+                }
+                Monitor.PulseAll(gate);
+            }
+        }
+
+        /// <summary>Forgets an owed halt once the mount accepts it, and notes when it went out (<see cref="OwedStopSentUtc"/>).</summary>
+        private void TrackHalt(Lx200Command command, Lx200Reply reply) {
+            if (!reply.IsOk || command.Effect != CommandEffect.Halt) {
+                return;
+            }
+            lock (gate) {
+                owedStopSent[command.Text] = reply.SentUtc;
+                owedStops.Remove(command.Text);
+                if (command.Spec?.Code == "Q") {
+                    owedStops.Remove(":Qn#");
+                    owedStops.Remove(":Qs#");
+                    owedStops.Remove(":Qe#");
+                    owedStops.Remove(":Qw#");
+                }
+            }
+        }
+
+        /// <summary>Under the lock, when the link closes: removes and returns every queued halt (the Stop lane, and halts waiting in other lanes).</summary>
+        private List<Request> TakeQueuedHalts() {
+            var halts = stops.ToList();
+            stops.Clear();
+            for (var i = 0; i < timed.Count; i++) {
+                if (timed[i].Command.Effect == CommandEffect.Halt) {
+                    halts.Add(timed[i]);
+                    timed.RemoveAt(i--);
+                }
+            }
+            for (var node = commands.First; node != null;) {
+                var nextNode = node.Next;
+                if (node.Value.Command.Effect == CommandEffect.Halt) {
+                    halts.Add(node.Value);
+                    commands.Remove(node);
+                }
+                node = nextNode;
+            }
+            return halts;
+        }
+
+        /// <summary>Sends the halts that were queued when the link closed; with no connection they are owed (and logged by Dispose).</summary>
+        private void SendHaltsOnClose(Lx200Connection conn, List<Request> halts) {
+            if (halts == null || halts.Count == 0) {
+                return;
+            }
+            Trace.Note($"sending {halts.Count} queued halt(s) before the port closes: {string.Join(" ", halts.Select(h => h.Command.Text))}");
+            foreach (var halt in halts) {
+                if (conn == null) {
+                    Owe(halt.Command);
+                    halt.Fail(new Lx200DisconnectedException($"{halt.Command.Text}: the LX200 link on {Name} closed while it was down"));
+                    continue;
+                }
+                try {
+                    var reply = conn.Send(halt.Command, halt.Shape, halt.Timeout);
+                    TrackHalt(halt.Command, reply);
+                    if (!reply.IsOk) {
+                        Owe(halt.Command);   // SendOwedStops tries once more
+                    }
+                    halt.Complete(reply);
+                } catch (Exception ex) {
+                    Owe(halt.Command);
+                    halt.Fail(ex);
                 }
             }
         }
@@ -721,10 +855,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                 try {
                     var cmd = Lx200Command.Parse(stop);
                     var reply = conn.Send(cmd);
-                    TrackOwedStops(cmd, reply);
-                    lock (gate) {
-                        owedStopSent[stop] = reply.SentUtc;
-                    }
+                    TrackHalt(cmd, reply);
                     if (stop == ":FQ#") {
                         conn.Send(cmd);   // a single :FQ# is sometimes missed (MN, RVM T1)
                     }
@@ -753,6 +884,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                 var t = timed[i];
                 if (Expired(t, now)) {
                     timed.RemoveAt(i);
+                    Owe(t.Command);
                     t.Fail(DownFor(t));
                 }
             }
@@ -763,6 +895,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                 var nextNode = node.Next;
                 if (Expired(node.Value, now)) {
                     list.Remove(node);
+                    Owe(node.Value.Command);
                     node.Value.Fail(DownFor(node.Value));
                 }
                 node = nextNode;
@@ -866,6 +999,12 @@ namespace NINA.Mac.Equipment.Lx200 {
             public DateTime EnqueuedUtc { get; }
 
             public DateTime? FirstRefusalUtc { get; set; }
+
+            /// <summary>Command and Poll lanes: not before this time (link clock), set when the mount refused it with a NAK.</summary>
+            public DateTime NotBefore { get; set; } = DateTime.MinValue;
+
+            /// <summary>NAK retries the link has made for this request.</summary>
+            public int NakRetries { get; set; }
 
             public CancellationTokenRegistration Registration { get; set; }
 

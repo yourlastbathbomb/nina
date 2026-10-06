@@ -221,6 +221,58 @@ namespace NINA.Mac.Equipment.Lx200.Test {
         }
 
         [Test]
+        public async Task Goto_WithTrackingOff_SwitchesTrackingOnFirst_AsNinasAscomTelescopeDoes() {
+            using var rig = new Rig();
+            var mount = await rig.ConnectTelescope();
+            mount.TrackingEnabled = false;   // e.g. a sequence's "Set Tracking: Stopped"
+            rig.Sim.Tracking.Should().BeFalse();
+            var received = rig.Received.Count;
+
+            (await mount.SlewToCoordinates(NearbyTarget(rig.Sim, 0.1, 1.0).J2000, CancellationToken.None)).Should().BeTrue();
+
+            rig.Received.Skip(received).Should().ContainInOrder(":AA#", ":MS#");
+            rig.Sim.Tracking.Should().BeTrue("the target must not drift out of the frame");
+            mount.TrackingEnabled.Should().BeTrue();
+        }
+
+        [Test]
+        public async Task SoftPark_SurvivesAReconnect_AndUnparkThenResumesTracking() {
+            using var rig = new Rig();
+            var mount = await rig.ConnectTelescope();
+            await mount.Park(CancellationToken.None);
+            rig.Sim.Tracking.Should().BeFalse();
+            mount.Disconnect();
+
+            await rig.ConnectTelescope();
+            mount.AtPark.Should().BeTrue("the soft park is kept in the profile");
+            (await mount.SlewToCoordinates(NearbyTarget(rig.Sim, 0.1, 1).J2000, CancellationToken.None)).Should().BeFalse("no goto while parked");
+            await mount.Unpark(CancellationToken.None);
+            mount.AtPark.Should().BeFalse();
+            rig.Sim.Tracking.Should().BeTrue("unpark resumes the tracking the park stopped");
+            rig.Settings.SoftParked.Should().BeFalse();
+
+            mount.Disconnect();
+            await rig.ConnectTelescope();
+            mount.AtPark.Should().BeFalse();
+        }
+
+        [Test]
+        public async Task SoftPark_UnparkedOnTheHandbox_IsNotRestored() {
+            using var rig = new Rig();
+            var mount = await rig.ConnectTelescope();
+            await mount.Park(CancellationToken.None);
+            mount.Disconnect();
+            using (var handbox = rig.Cable.Open(new Lx200Trace())) {   // tracking switched on at the mount meanwhile
+                handbox.Write(System.Text.Encoding.ASCII.GetBytes(":AA#"));
+                (await Rig.Eventually(() => rig.Sim.Tracking, TimeSpan.FromSeconds(2))).Should().BeTrue();
+            }
+
+            await rig.ConnectTelescope();
+            mount.AtPark.Should().BeFalse("a mount that tracks again was unparked elsewhere");
+            rig.Settings.SoftParked.Should().BeFalse();
+        }
+
+        [Test]
         public async Task SoftPark_ToAStoredPosition_SlewsThereFirst() {
             using var rig = new Rig();
             var mount = await rig.ConnectTelescope();
@@ -278,9 +330,11 @@ namespace NINA.Mac.Equipment.Lx200.Test {
         }
 
         [Test]
-        public async Task Site_WithinTheMountsArcminute_ReportsTheProfile_AndWritesAreTolerant() {
-            using var rig = new Rig();
+        public async Task Site_WithinTheMountsArcminute_ReportsTheProfile_AndWritesBeforeAlignmentAreTolerant() {
+            // the site may only be written before alignment (plan, "Time and site authority"): a mount that is not aligned yet
+            using var rig = new Rig(new SimOptions { AlignmentStatus = '0', SlewSeconds = 0.8, PlanetaryUpdateSeconds = 0.2 });
             var mount = await rig.ConnectTelescope();
+            mount.IsAligned.Should().BeFalse();
             rig.Sim.LongitudeEast.Should().BeApproximately(114 + (11.0 / 60), 1e-9, "the mount keeps 114°11'");
 
             mount.SiteLongitude.Should().Be(114.18, "0.0033° off is the mount's 1' rounding, not a different site (RIM MNT-14)");
@@ -293,6 +347,32 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             mount.SiteLongitude = 114.17;
             rig.Received.Should().Contain(":Sg245*50#");
             mount.SiteLongitude.Should().Be(114.17);
+        }
+
+        [Test]
+        public async Task Site_OnAnAlignedMount_IsNeverWritten_AndTheMountsValueStaysReported() {
+            using var rig = new Rig();
+            var mount = await rig.ConnectTelescope();
+            mount.IsAligned.Should().BeTrue();
+            using var notes = Rig.CaptureNotifications();
+
+            mount.SiteLatitude = 22.3;      // what NINA's TOTELESCOPE site sync does at connect (TelescopeVM.cs:445-451)
+            mount.SiteLongitude = 114.5;
+
+            rig.Received.Should().NotContain(c => c.StartsWith(":St", StringComparison.Ordinal) || c.StartsWith(":Sg", StringComparison.Ordinal),
+                "after alignment the port only verifies the site, never writes it");
+            mount.SiteLatitude.Should().Be(22.25, "the mount's own site is still reported, so NINA's check after its sync says it could not be set");
+            mount.SiteLongitude.Should().Be(114.18);
+            notes.Posted.Should().Contain(n => n.Kind == NotificationKind.Warning && n.Message.Contains("not written") && n.Message.Contains("aligned"));
+        }
+
+        [Test]
+        public async Task Site_IsNeverWritten_WhenGwCannotTellWhetherTheMountIsAligned() {
+            using var rig = new Rig(new SimOptions { GwSupported = false, SlewSeconds = 0.8, PlanetaryUpdateSeconds = 0.2 });
+            var mount = await rig.ConnectTelescope();
+            mount.IsAligned.Should().BeNull();
+            mount.SiteLatitude = 22.3;
+            rig.Received.Should().NotContain(c => c.StartsWith(":St", StringComparison.Ordinal));
         }
 
         [Test]

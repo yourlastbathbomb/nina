@@ -1,0 +1,98 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Sequencer (the advanced-sequencer engine) compiled headless for net10.0 / osx-arm64. Upstream files are linked,
+    never copied. The assembly keeps upstream's name, NINA.Sequencer, because every saved sequence and template stores
+    assembly-qualified $type names (Serialization/JsonCreationConverter.cs), so sequences move between Windows NINA and the mac
+    build unchanged. Exclusions are grouped by reason; MacReplacements/ holds two trimmed copies of Editing files whose WPF
+    members only XAML uses, and Mac/ the mac-only assembly attributes and namespace anchors.
+    See ../README-engine.md (NINA.Sequencer) and ../../docs/m7-headless-sequencer-plan.md.
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Sequencer</AssemblyName>
+    <RootNamespace>NINA.Sequencer</RootNamespace>
+    <UpstreamDir>$(NinaRoot)NINA.Sequencer/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+
+    <!-- As upstream (NINA.Sequencer.csproj) -->
+    <Compile Remove="$(UpstreamDir)Converters/**" />
+    <Compile Remove="$(UpstreamDir)Logic/ValConverter.cs" />
+
+    <!-- XAML code-behind, WPF views, value converters, template selectors and behaviours: the sequencer editor's UI -->
+    <Compile Remove="$(UpstreamDir)**/*.xaml.cs" />
+    <Compile Remove="$(UpstreamDir)View/**" />
+    <Compile Remove="$(UpstreamDir)Behaviors/**" />
+    <Compile Remove="$(UpstreamDir)Logic/ExprConverter.cs" />
+
+    <!-- Editing: WPF-binding glue. The two files with WPF-free cores are replaced by trimmed copies in MacReplacements/Editing -->
+    <Compile Remove="$(UpstreamDir)Editing/SequenceEditContext.cs" />
+    <Compile Remove="$(UpstreamDir)Editing/SequencePropertyCapture.cs" />
+    <Compile Remove="$(UpstreamDir)Editing/SequenceEditBindingResolver.cs" />
+    <Compile Remove="$(UpstreamDir)Editing/PendingSequenceEdit.cs" />
+
+    <!-- Meridian flip: an alt-az mount never flips. Leaving the triggers out of the build means nothing can schedule a flip, and
+         ItemUtility.GetMeridianFlipTime finds no IMeridianFlipTrigger, so dithers and drift centring are never held back for one -->
+    <Compile Remove="$(UpstreamDir)Trigger/MeridianFlip/**" />
+
+    <!-- Autofocus: focusing is manual (Bahtinov/HFR on the timed #1209); the items need NINA.WPF.Base's AutoFocusVM stack -->
+    <Compile Remove="$(UpstreamDir)SequenceItem/Autofocus/**" />
+    <Compile Remove="$(UpstreamDir)Trigger/Autofocus/**" />
+
+    <!-- Devices the rig does not have: rotator, dome, switch, safety monitor; flat-panel and twilight-flat training items -->
+    <Compile Remove="$(UpstreamDir)SequenceItem/Rotator/**" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Platesolving/CenterAndRotate.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Platesolving/SolveAndRotate.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Dome/**" />
+    <Compile Remove="$(UpstreamDir)Trigger/Dome/**" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Switch/**" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/SafetyMonitor/**" />
+    <Compile Remove="$(UpstreamDir)Conditions/SafetyMonitorCondition.cs" />
+    <Compile Remove="$(UpstreamDir)Trigger/SafetyMonitor/**" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/AutoBrightnessFlat.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/SkyFlat.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/TrainedFlatExposure.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/TrainedDarkFlatExposure.cs" />
+
+    <!-- Guiding beyond the mount dither (no guide camera; DirectGuider dithers through the mount) and position-less focuser moves -->
+    <Compile Remove="$(UpstreamDir)SequenceItem/Guider/StartGuiding.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Guider/StopGuiding.cs" />
+    <Compile Remove="$(UpstreamDir)Trigger/Guider/RestoreGuiding.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Focuser/**" />
+
+    <!-- UI-only or Windows-only items: WinForms subframe picker, imaging-layout loader, modal message box, save dialog,
+         custom trigger editor, mount homing (the LX200GPS has no home), profile switching -->
+    <Compile Remove="$(UpstreamDir)SequenceItem/Imaging/TakeSubframeExposure.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Utility/LoadImagingLayout.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Utility/MessageBox.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Utility/SaveSequence.cs" />
+    <Compile Remove="$(UpstreamDir)Trigger/Utility/CustomTrigger.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Telescope/FindHome.cs" />
+    <Compile Remove="$(UpstreamDir)SequenceItem/Connect/SwitchProfile.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.WPF.Base.Mac/NINA.WPF.Base.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <!-- As upstream: an analyzer (source generator) and, through the default ReferenceOutputAssembly, the attribute assembly -->
+    <ProjectReference Include="../NINA.Sequencer.Generators.Mac/NINA.Sequencer.Generators.Mac.csproj" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.Sequencer.csproj (UpstreamParityTest checks them) -->
+  <ItemGroup>
+    <PackageReference Include="NCalcSync" Version="7.0.0" />
+    <PackageReference Include="Parlot" Version="1.5.8" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

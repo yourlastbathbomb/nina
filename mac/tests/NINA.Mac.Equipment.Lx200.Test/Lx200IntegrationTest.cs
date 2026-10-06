@@ -83,6 +83,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
                 (await mount.Connect(CancellationToken.None)).Should().BeTrue();
                 (await focuser.Connect(CancellationToken.None)).Should().BeTrue();
                 mount.Link.Name.Should().Be(pty.SlavePath);
+                mount.Link.Options.WatchPortNode.Should().BeTrue("the default pool watches the device node while idle");
                 var (ra, dec) = sim.BelievedRaDec;
                 var target = new Coordinates(Angle.ByHours(ra), Angle.ByDegree(dec + 2), Epoch.JNOW);
                 (await mount.SlewToCoordinates(target, CancellationToken.None)).Should().BeTrue();
