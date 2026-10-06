@@ -74,7 +74,7 @@ namespace NINA.Mac.Sequencer.Test {
         [Test]
         public void Triggers_HaveNoMeridianFlip() {
             Names(Catalogue.Triggers).Should().Equal(new[] {
-                "CenterAfterDriftTrigger", "DitherAfterExposures", "ReconnectOnDownloadFailure", "ReconnectTrigger"
+                "CenterAfterDriftTrigger", "DitherAfterExposures", "KeyholeTrigger", "ReconnectOnDownloadFailure", "ReconnectTrigger"
             }.OrderBy(n => n, StringComparer.Ordinal));
             Catalogue.Triggers.Should().NotContain(t => t is IMeridianFlipTrigger);
         }
@@ -99,7 +99,7 @@ namespace NINA.Mac.Sequencer.Test {
                 .Select(t => t.FullName).Should().BeEmpty("a new upstream entity must be catalogued or listed in CompiledButNotCatalogued with a reason");
             RigSequencerCatalogue.CompiledButNotCatalogued.Keys.Should().OnlyContain(t => exported.Contains(t));
             RigSequencerCatalogue.CompiledButNotCatalogued.Values.Should().OnlyContain(reason => reason.Length > 10);
-            catalogued.Should().OnlyContain(t => exported.Contains(t) || t == typeof(MaxAltitudeCondition));
+            catalogued.Should().OnlyContain(t => exported.Contains(t) || t == typeof(MaxAltitudeCondition) || t == typeof(NINA.Mac.Sequencing.Triggers.KeyholeTrigger));
         }
 
         [Test]

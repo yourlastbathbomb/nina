@@ -58,10 +58,15 @@
     <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/TrainedFlatExposure.cs" />
     <Compile Remove="$(UpstreamDir)SequenceItem/FlatDevice/TrainedDarkFlatExposure.cs" />
 
-    <!-- Guiding beyond the mount dither (no guide camera; DirectGuider dithers through the mount) and position-less focuser moves -->
+    <!-- Guiding beyond the mount dither (no guide camera; DirectGuider dithers through the mount) -->
     <Compile Remove="$(UpstreamDir)SequenceItem/Guider/StartGuiding.cs" />
     <Compile Remove="$(UpstreamDir)SequenceItem/Guider/StopGuiding.cs" />
     <Compile Remove="$(UpstreamDir)Trigger/Guider/RestoreGuiding.cs" />
+    <!-- Focuser moves: not composed YET, not unusable. The #1209 has a virtual position (milliseconds of motor time,
+         MAC_PORT_PLAN.md section 2, "Focuser model") that fits NINA's IFocuser unchanged, so MoveFocuserAbsolute and
+         MoveFocuserRelative (they need only IFocuserMediator) are to be compiled and catalogued once M8 composes FocuserVM over
+         Lx200Focuser (README-engine.md, M7 open items). MoveFocuserByTemperature needs a temperature source (the LX200GPS ":fT#"
+         OTA sensor). Until then a saved sequence with any of them loads it as Unknown, and the run skips it. -->
     <Compile Remove="$(UpstreamDir)SequenceItem/Focuser/**" />
 
     <!-- UI-only or Windows-only items: WinForms subframe picker, imaging-layout loader, modal message box, save dialog,

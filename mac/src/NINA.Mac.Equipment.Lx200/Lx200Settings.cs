@@ -19,18 +19,22 @@ using System;
 namespace NINA.Mac.Equipment.Lx200 {
 
     /// <summary>
-    /// How <see cref="Lx200Telescope.PulseGuide"/> moves the mount. Whether stock firmware accepts ":Mg" in alt-az mode is the
-    /// open M2 bench question (plan risk 1, RIM MNT-05); the bench checklist's step 6 decides.
+    /// How <see cref="Lx200Telescope.PulseGuide"/> moves the mount. Plan risk 1 (RIM MNT-05) asked whether the firmware accepts
+    /// ":Mg" in alt-az mode; the M2 read-out on this rig's mount (firmware 4.0g, 2026-10-06, mac/docs/m2-mount-readout-2026-10-06.md)
+    /// showed that it does: ":Mgn/s/e/w3000#" ran the motors on all four directions, unaligned. <see cref="NativePulse"/> is
+    /// therefore the default (<see cref="Lx200Settings.PulseStrategy"/>); the others stay selectable. The size and direction of a
+    /// pulse per axis after an alignment is still to be measured at the bench (checklist step 6).
     /// </summary>
     public enum Lx200PulseStrategy {
 
         /// <summary>
         /// <see cref="NativePulse"/> on StarPatch firmware (":GVN#" ends in an upper-case letter, e.g. "4.2G", which Meade.net trusts
-        /// with alt-az pulses, RVM MNT-M5), otherwise <see cref="HostTimedMove"/>, which moves on every firmware.
+        /// with alt-az pulses, RVM MNT-M5), otherwise <see cref="HostTimedMove"/>, which moves on every firmware. The conservative
+        /// choice from before the M2 read-out; no longer the default.
         /// </summary>
         Auto,
 
-        /// <summary>":Mg{n,s,e,w}DDDD#": the mount times the pulse (P07 l.544-551).</summary>
+        /// <summary>":Mg{n,s,e,w}DDDD#": the mount times the pulse (P07 l.544-551). The default: accepted in alt-az by this rig's 4.0g.</summary>
         NativePulse,
 
         /// <summary>":RG#" (guide rate), ":Mn#"/":Ms#"/":Me#"/":Mw#", then the matching ":Qx#" timed by the host (Meade.net's "old method").</summary>
@@ -99,8 +103,12 @@ namespace NINA.Mac.Equipment.Lx200 {
 
         // ---- Mount ------------------------------------------------------------------------------------------
 
+        /// <summary>
+        /// Pulse-guide strategy; default <see cref="Lx200PulseStrategy.NativePulse"/> (":Mg", measured to work in alt-az on this rig's
+        /// firmware 4.0g). A value stored in the profile wins, so a profile that chose another strategy keeps it.
+        /// </summary>
         public Lx200PulseStrategy PulseStrategy {
-            get => store.GetValueEnum(nameof(PulseStrategy), Lx200PulseStrategy.Auto);
+            get => store.GetValueEnum(nameof(PulseStrategy), Lx200PulseStrategy.NativePulse);
             set => store.SetValueEnum(nameof(PulseStrategy), value);
         }
 

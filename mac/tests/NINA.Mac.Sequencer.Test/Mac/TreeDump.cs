@@ -13,6 +13,7 @@
 #endregion "copyright"
 
 using NINA.Mac.Sequencing.Conditions;
+using NINA.Mac.Sequencing.Triggers;
 using NINA.Sequencer;
 using NINA.Sequencer.Conditions;
 using NINA.Sequencer.Container;
@@ -51,6 +52,12 @@ namespace NINA.Mac.Sequencer.Test {
             if (container is ITriggerable triggerable) {
                 foreach (var trigger in triggerable.GetTriggersSnapshot()) {
                     Line(trigger, depth + 1, text, "[trigger] ");
+                    if (trigger is KeyholeTrigger keyhole) {
+                        // Its instructions are part of the generated tree (the other triggers bring their own)
+                        foreach (var item in keyhole.TriggerRunner.GetItemsSnapshot()) {
+                            Line(item, depth + 2, text);
+                        }
+                    }
                 }
             }
             if (container is IImmutableContainer && container is not SequenceRootContainer) {
@@ -85,6 +92,7 @@ namespace NINA.Mac.Sequencer.Test {
                 TimeCondition t => $"Provider={t.SelectedProvider?.GetType().Name} MinutesOffset={t.MinutesOffset}",
                 AboveHorizonCondition h => $"Offset={F(h.Offset)}",
                 MaxAltitudeCondition m => $"MaxAltitude={F(m.MaxAltitude)}",
+                KeyholeTrigger k => $"MaxAltitude={F(k.MaxAltitude)}",
                 AltitudeCondition a => $"Offset={F(a.Offset)}",
                 LoopWhile w => $"Predicate=\"{w.PredicateExpression.Definition}\"",
                 DitherAfterExposures d => $"AfterExposures={d.AfterExposures}",

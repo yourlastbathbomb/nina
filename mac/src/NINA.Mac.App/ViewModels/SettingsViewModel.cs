@@ -17,11 +17,12 @@ using CommunityToolkit.Mvvm.Input;
 using NINA.Mac.App.Services;
 using NINA.Mac.Platform;
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace NINA.Mac.App.ViewModels {
 
-    /// <summary>Step 8: site, optics, limits, storage, keep-awake, night vision, and the simulator switches.</summary>
+    /// <summary>Step 8: devices (Simulated or Real), plate solving, site, optics, limits, storage, keep-awake, night vision, and the simulator switches.</summary>
     public sealed partial class SettingsViewModel : PageViewModel {
         private readonly AppServices services;
         private readonly IThemeController theme;
@@ -62,6 +63,21 @@ namespace NINA.Mac.App.ViewModels {
 
         public bool DevicesSimulated => services.DevicesSimulated;
 
+        public IReadOnlyList<DeviceSource> DeviceSources { get; } = Enum.GetValues<DeviceSource>();
+
+        /// <summary>What runs now; the device source setting takes effect at the next start.</summary>
+        public string ActiveDevicesText => services.DevicesSimulated
+            ? services.EngineError != null
+                ? $"Running with the simulators: Real devices could not start ({services.EngineError})."
+                : "Running with the simulators. Nothing is opened (the serial port list is real)."
+            : "Running with Real devices: NINA's ZWO camera driver, the LX200 driver on the selected serial port, ASTAP and solve-field.";
+
+        public bool HasEngineError => services.EngineError != null;
+
+        public string EngineDataDirectory => services.Engine != null ? NINA.Mac.App.Engine.EngineRuntime.DataDirectory : services.DataPaths.EngineDataDirectory;
+
+        public string SolverProblem => services.Engine?.Solvers?.Problem;
+
         public string PixelScaleText => $"{Draft.Optics.PixelScaleArcsec:0.000}″/px at bin {Draft.Optics.Bin}, field {FieldText()}";
 
         partial void OnImagesRootTextChanged(string value) {
@@ -87,7 +103,13 @@ namespace NINA.Mac.App.ViewModels {
                 Validate(Draft);
                 services.Settings.Save(Draft);
                 theme?.Apply(Draft.NightVision);
-                SavedMessage = $"Saved to {SettingsFile}";
+                SavedMessage = Draft.DeviceSource != services.ActiveDeviceSource
+                    ? $"Saved to {SettingsFile}. Restart {services.Info.ShortName} to switch to {(Draft.DeviceSource == DeviceSource.Real ? "Real" : "simulated")} devices."
+                    : services.EngineSettingsError is { } engineError
+                        ? $"Saved to {SettingsFile}, but the engine could not take the new settings: {engineError}"
+                        : services.Engine?.SettingsPending == true
+                            ? $"Saved to {SettingsFile}. The run in progress keeps its settings; the new ones apply when it ends."
+                            : $"Saved to {SettingsFile}";
                 Load(services.Settings.Current);
             } catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is UnauthorizedAccessException || ex is InvalidOperationException) {
                 ShowError(ex);
@@ -102,10 +124,10 @@ namespace NINA.Mac.App.ViewModels {
         }
 
         [RelayCommand]
-        private void SimulateCameraLoss() => services.SimCamera.SimulateConnectionLoss();
+        private void SimulateCameraLoss() => services.SimCamera?.SimulateConnectionLoss();
 
         [RelayCommand]
-        private void SimulateMountLoss() => services.SimMount.SimulateConnectionLoss();
+        private void SimulateMountLoss() => services.SimMount?.SimulateConnectionLoss();
 
         private void Load(AppSettings settings) {
             Draft = settings.Clone();
@@ -138,6 +160,9 @@ namespace NINA.Mac.App.ViewModels {
             if (s.WarmupRateCelsiusPerMinute <= 0 || s.FieldRotationBlurPixels <= 0) {
                 throw new ArgumentException("Warm-up rate and field-rotation blur must be positive");
             }
+            if (s.Solver != null && (s.Solver.CentreThresholdArcmin <= 0 || s.Solver.RecenterArcmin < 0)) {
+                throw new ArgumentException("Plate solving: the centring threshold must be positive and the drift recentring 0 (off) or more");
+            }
         }
     }
 
@@ -167,6 +192,8 @@ namespace NINA.Mac.App.ViewModels {
             ".NET runtime — MIT",
             "ZWO ASI Camera SDK — MIT-style (ZWO Company)",
             "libusb 1.0 — LGPL-2.1 (dynamically linked)",
+            "Accord.NET / AForge.NET imaging (N.I.N.A.'s Accord.Imaging fork, NINA.Mac.ImageAnalysis.Accord) — LGPL-2.1 (separate assemblies)",
+            "N.I.N.A. engine packages (Newtonsoft.Json, Serilog, Entity Framework 6, System.Data.SQLite, NCalc and others) — their own licences, listed in the notices",
             // SOFA licence clause 3(a): the work must carry this statement
             "IAU SOFA (libsofa) — SOFA Software License. This application uses routines and computations derived by its developers from software provided by SOFA under license to them, and does not itself constitute software provided by and/or endorsed by SOFA.",
             "NOVAS C3.1 (libnovas31) — Astronomical Applications Department, U.S. Naval Observatory",

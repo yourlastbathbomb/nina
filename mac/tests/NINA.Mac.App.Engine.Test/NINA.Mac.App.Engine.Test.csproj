@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M8: the Real (engine) device services of NINA.Mac.App.Engine against simulators and fakes, never hardware:
+    - the camera: NINA's CameraVM and ImagingVM over a fake ZWO camera (Fakes/FakeCamera.cs: synthetic star fields, a cooler
+      model, ZWO mono-bin, USB loss and a frozen-temperature mode), frames saved through NINA's file patterns;
+    - the mount and focuser: the real LX200 driver (NINA.Mac.Equipment.Lx200) over the Autostar II simulator on an in-memory
+      cable (NINA.Mac.Equipment.Lx200.Test's SimCable, linked read-only);
+    - plate solving and centring: NINA's CenteringSolver with a fake solver that reports where the simulated mount points;
+    - the run: NINA's sequencer through NINA.Mac.Sequencing, end to end.
+    The engine never sees the real camera: every test passes its own camera list (the gated default would scan USB).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.App.Engine.Test</RootNamespace>
+    <AssemblyName>NINA.Mac.App.Engine.Test</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.App.Engine/NINA.Mac.App.Engine.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.Lx200.Sim/NINA.Mac.Lx200.Sim.csproj" />
+  </ItemGroup>
+
+  <!-- The LX200 driver tests' unpluggable in-memory cable to the Autostar simulator (linked read-only) -->
+  <ItemGroup>
+    <Compile Include="../NINA.Mac.Equipment.Lx200.Test/SimCable.cs" Link="Linked/SimCable.cs" />
+  </ItemGroup>
+
+</Project>

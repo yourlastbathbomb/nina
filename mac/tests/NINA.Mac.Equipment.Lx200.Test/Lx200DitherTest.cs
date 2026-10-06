@@ -237,7 +237,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
 
         [Test]
         public async Task Auto_OnStockFirmware_DithersWithHostTimedMoves() {
-            using var rig = new Rig();
+            using var rig = new Rig(configure: s => s.PulseStrategy = Lx200PulseStrategy.Auto);
             rig.Profile.GuiderSettings.DitherPixels = 10;
             rig.Profile.GuiderSettings.MountDitherMinimumPixels = 5;
             using var dither = await ConnectedDither(rig);

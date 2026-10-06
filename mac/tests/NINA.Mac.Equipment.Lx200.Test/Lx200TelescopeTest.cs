@@ -48,7 +48,8 @@ namespace NINA.Mac.Equipment.Lx200.Test {
 
         [Test]
         public async Task Connect_ReadsTheMount_SwitchesToHighPrecision_AndLeavesHighPrecisionPointingOff() {
-            using var rig = new Rig(new SimOptions { HighPrecisionPointing = true, SlewSeconds = 0.8, PlanetaryUpdateSeconds = 0.2 });
+            using var rig = new Rig(new SimOptions { HighPrecisionPointing = true, SlewSeconds = 0.8, PlanetaryUpdateSeconds = 0.2 },
+                                    configure: s => s.PulseStrategy = Lx200PulseStrategy.Auto);
             rig.Sim.LongFormat.Should().BeFalse("the Autostar starts in the short format");
             var mount = await rig.ConnectTelescope();
 
@@ -74,7 +75,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
 
         [Test]
         public async Task Auto_UsesTheNativePulse_OnStarPatchFirmware() {
-            using var rig = new Rig(new SimOptions { Firmware = "4.2G" });
+            using var rig = new Rig(new SimOptions { Firmware = "4.2G" }, configure: s => s.PulseStrategy = Lx200PulseStrategy.Auto);
             var mount = await rig.ConnectTelescope();
             mount.EffectivePulseStrategy.Should().Be(Lx200PulseStrategy.NativePulse);
         }

@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Native macOS app shell (Avalonia). M8/M9 groundwork: the eight night screens run against simulated
-    device services until the headless engine exists. Packaged by mac/packaging/package-app.sh.
+    Native macOS app shell (Avalonia). The eight night screens run against the device services of NINA.Mac.App.Engine:
+    simulated (default) or Real (the headless engine), picked in Settings. Packaged by mac/packaging/package-app.sh.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -79,6 +79,12 @@
 
   <ItemGroup>
     <ProjectReference Include="../NINA.Mac.Platform/NINA.Mac.Platform.csproj" />
+    <!--
+      The service contracts and the Real (engine) device services: NINA's camera, the LX200 driver, plate solving, image
+      analysis, the Siril layout and the headless sequencer. Brings every engine assembly, the native dylibs, External/JPLEPH
+      and Database/ into the output (and the .app).
+    -->
+    <ProjectReference Include="../NINA.Mac.App.Engine/NINA.Mac.App.Engine.csproj" />
   </ItemGroup>
 
   <ItemGroup>

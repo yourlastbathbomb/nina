@@ -5,6 +5,7 @@
     <Project Path="src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
     <Project Path="src/NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
     <Project Path="src/NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <Project Path="src/NINA.Mac.App.Engine/NINA.Mac.App.Engine.csproj" />
     <Project Path="src/NINA.Mac.App/NINA.Mac.App.csproj" />
     <Project Path="src/NINA.Mac.Equipment.Lx200/NINA.Mac.Equipment.Lx200.csproj" />
     <Project Path="src/NINA.Mac.ImageAnalysis/NINA.Mac.ImageAnalysis.csproj" />
@@ -35,6 +36,7 @@
     <Project Path="src/NINA.Mac.RigTools/rigplan/rigplan.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/NINA.Mac.App.Engine.Test/NINA.Mac.App.Engine.Test.csproj" />
     <Project Path="tests/NINA.Mac.App.Test/NINA.Mac.App.Test.csproj" />
     <Project Path="tests/NINA.Mac.Astrometry.Test/NINA.Mac.Astrometry.Test.csproj" />
     <Project Path="tests/NINA.Mac.Engine.Test/NINA.Mac.Engine.Test.csproj" />

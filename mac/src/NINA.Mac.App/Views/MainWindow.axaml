@@ -85,6 +85,7 @@
             <Ellipse Classes="dot" Classes.connected="{Binding StatusBar.Mount.IsConnected}" Classes.busy="{Binding StatusBar.Mount.IsConnecting}" Classes.lost="{Binding StatusBar.Mount.IsLost}" />
             <TextBlock Text="Mount" FontWeight="SemiBold" />
             <TextBlock Name="MountStatus" Text="{Binding StatusBar.Mount.Detail}" Classes="muted" />
+            <Button Name="StopMountButton" Content="Stop" Command="{Binding StatusBar.StopMountCommand}" IsVisible="{Binding StatusBar.IsMountSlewing}" Padding="8,0" ToolTip.Tip="Halt the mount (and the run that is moving it)" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,22,0" ToolTip.Tip="{Binding StatusBar.Focuser.StateText}">
             <Ellipse Classes="dot" Classes.connected="{Binding StatusBar.Focuser.IsConnected}" Classes.busy="{Binding StatusBar.Focuser.IsConnecting}" Classes.lost="{Binding StatusBar.Focuser.IsLost}" />

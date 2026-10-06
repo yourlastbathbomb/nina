@@ -16,8 +16,11 @@ using NINA.Core.Utility;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace NINA.PlateSolving.Mac {
 
@@ -40,6 +43,8 @@ namespace NINA.PlateSolving.Mac {
         public const string ConfigFileName = "astrometry.cfg";
 
         private static readonly object configLock = new object();
+        private static readonly Regex series4200 = new Regex(@"^index-42(?<scale>\d\d)(?:-(?<tile>\d\d))?\.fits$", RegexOptions.CultureInvariant);
+        private static string lastReportedGap;
         private static IReadOnlyList<string> indexDirectories = new[] { DefaultIndexDirectory };
         private static string configDirectory;
         private static int cpuLimitSeconds = 300;
@@ -117,6 +122,64 @@ namespace NINA.PlateSolving.Mac {
                 .ToList();
         }
 
+        /// <summary>
+        /// How many files one scale of astrometry.net's 4200 series (2MASS) has: scales 00-04 are split into 48 HEALPix tiles
+        /// (index-42SS-00 to -47), 05-07 into 12 (-00 to -11), and 08-19 are a single file (index-42SS.fits).
+        /// </summary>
+        public static int TilesPerScale4200(int scale) => scale <= 4 ? 48 : scale <= 7 ? 12 : 1;
+
+        /// <summary>
+        /// The 4200-series index files that are missing from a scale that is partly installed in <see cref="IndexDirectories"/>
+        /// (all folders together), as file names, sorted. A scale with no file at all is a choice, not a gap, and is not listed.
+        /// solve-field cannot solve a field whose sky region lies in a missing tile at that scale, and fails without saying why.
+        /// </summary>
+        public static IReadOnlyList<string> FindMissingIndexTiles() {
+            var present = new Dictionary<int, HashSet<int>>();
+            foreach (var file in FindIndexFiles()) {
+                var match = series4200.Match(Path.GetFileName(file));
+                if (!match.Success) {
+                    continue;
+                }
+                var scale = int.Parse(match.Groups["scale"].Value, CultureInfo.InvariantCulture);
+                if (!present.TryGetValue(scale, out var tiles)) {
+                    present[scale] = tiles = new HashSet<int>();
+                }
+                if (match.Groups["tile"].Success) {
+                    tiles.Add(int.Parse(match.Groups["tile"].Value, CultureInfo.InvariantCulture));
+                }
+            }
+            var missing = new List<string>();
+            foreach (var (scale, tiles) in present.OrderBy(p => p.Key)) {
+                var count = TilesPerScale4200(scale);
+                if (count == 1) {
+                    continue;
+                }
+                for (var tile = 0; tile < count; tile++) {
+                    if (!tiles.Contains(tile)) {
+                        missing.Add(string.Create(CultureInfo.InvariantCulture, $"index-42{scale:00}-{tile:00}.fits"));
+                    }
+                }
+            }
+            return missing;
+        }
+
+        /// <summary>
+        /// A startup or settings check for the host: null when every partly installed 4200-series scale is complete, otherwise a
+        /// message that names the missing tiles (<see cref="FindMissingIndexTiles"/>) and says where they go. Nightglass never
+        /// downloads them itself.
+        /// </summary>
+        public static string DescribeMissingIndexTiles() {
+            var missing = FindMissingIndexTiles();
+            if (missing.Count == 0) {
+                return null;
+            }
+            return string.Format(CultureInfo.InvariantCulture,
+                "astrometry.net index incomplete: {0} tile{1} missing ({2}) in {3}. solve-field cannot solve fields in those sky regions at those scales; " +
+                "download the missing files from data.astrometry.net/4200/ into that folder.",
+                missing.Count, missing.Count == 1 ? "" : "s", string.Join(", ", missing.Select(f => Path.GetFileNameWithoutExtension(f))),
+                string.Join(", ", IndexDirectories.Select(d => $"'{d}'")));
+        }
+
         /// <summary>The astrometry.cfg text for the current settings: cpulimit, one add_path per index folder, autoindex.</summary>
         public static string BuildConfig() {
             var text = new StringBuilder();
@@ -134,7 +197,8 @@ namespace NINA.PlateSolving.Mac {
         /// <summary>
         /// Writes <see cref="BuildConfig"/> to <see cref="ConfigFilePath"/> (only when the text changed) and returns the path.
         /// Throws <see cref="InvalidOperationException"/> when no index folder holds an index-*.fits file, because solve-field
-        /// would then run until its CPU limit and fail without saying why.
+        /// would then run until its CPU limit and fail without saying why. Missing 4200-series tiles
+        /// (<see cref="DescribeMissingIndexTiles"/>) are logged as a warning, once per distinct gap.
         /// </summary>
         public static string WriteConfig() {
             var indexFiles = FindIndexFiles();
@@ -142,6 +206,10 @@ namespace NINA.PlateSolving.Mac {
                 throw new InvalidOperationException(
                     $"astrometry.net: no index files (index-*.fits) found in {string.Join(", ", IndexDirectories.Select(d => $"'{d}'"))}. " +
                     "Download the index files that match the field size, or set AstrometryNetSetup.IndexDirectories.");
+            }
+            var gap = DescribeMissingIndexTiles();
+            if (gap != null && !string.Equals(Interlocked.Exchange(ref lastReportedGap, gap), gap, StringComparison.Ordinal)) {
+                Logger.Warning(gap);
             }
             var path = ConfigFilePath;
             var text = BuildConfig();

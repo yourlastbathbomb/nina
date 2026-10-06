@@ -34,6 +34,34 @@
       <Grid ColumnDefinitions="*,*">
         <Border Classes="card" Margin="0,0,14,0">
           <StackPanel>
+            <TextBlock Text="Devices" Classes="h2" />
+            <StackPanel Classes="row">
+              <TextBlock Classes="label" Text="Device source" />
+              <ComboBox Name="DeviceSource" Width="150" ItemsSource="{Binding DeviceSources}" SelectedItem="{Binding Draft.DeviceSource}" />
+            </StackPanel>
+            <TextBlock Name="ActiveDevices" Text="{Binding ActiveDevicesText}" Classes="muted small" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock Text="Takes effect the next time the app starts. Real opens the camera on USB and the mount on the serial port only when you connect them." Classes="muted small" TextWrapping="Wrap" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Mono-bin focus frames" /><CheckBox IsChecked="{Binding Draft.FocusMonoBin}" /></StackPanel>
+            <TextBlock Classes="muted small" TextWrapping="Wrap"><Run Text="Engine data (NINA logs, rig profile): " /><Run Text="{Binding EngineDataDirectory}" /></TextBlock>
+          </StackPanel>
+        </Border>
+        <Border Classes="card" Grid.Column="1">
+          <StackPanel>
+            <TextBlock Text="Plate solving (Real devices)" Classes="h2" />
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="ASTAP (astap_cli)" /><TextBox Name="AstapExecutable" Text="{Binding Draft.Solver.AstapExecutable}" Width="230" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="ASTAP database (D80)" /><TextBox Text="{Binding Draft.Solver.AstapDatabase}" Width="230" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="solve-field folder" /><TextBox Text="{Binding Draft.Solver.AstrometryBinDirectory}" Width="230" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Centred within (′)" /><NumericUpDown Value="{Binding Draft.Solver.CentreThresholdArcmin}" Minimum="0.1" Maximum="30" Increment="0.1" FormatString="0.0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Recentre on drift (′, 0 = off)" /><NumericUpDown Value="{Binding Draft.Solver.RecenterArcmin}" Minimum="0" Maximum="30" Increment="0.5" FormatString="0.0" /></StackPanel>
+            <StackPanel Classes="row"><TextBlock Classes="label" Text="Centre before a run" /><CheckBox IsChecked="{Binding Draft.CentreBeforeRun}" /></StackPanel>
+            <TextBlock Text="{Binding SolverProblem}" Classes="warn" TextWrapping="Wrap" IsVisible="{Binding SolverProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <Grid ColumnDefinitions="*,*">
+        <Border Classes="card" Margin="0,0,14,0">
+          <StackPanel>
             <TextBlock Text="Site" Classes="h2" />
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Name" /><TextBox Text="{Binding Draft.Site.Name}" Width="220" /></StackPanel>
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Latitude (°, N +)" /><NumericUpDown Name="Latitude" Value="{Binding Draft.Site.LatitudeDegrees}" Minimum="-90" Maximum="90" Increment="0.01" FormatString="0.0000" /></StackPanel>

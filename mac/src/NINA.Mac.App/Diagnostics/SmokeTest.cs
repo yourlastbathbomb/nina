@@ -147,6 +147,9 @@ namespace NINA.Mac.App {
                 return loaded.Count == 0 ? "none found" : string.Join(", ", loaded);
             });
 
+            // Real devices composed through the headless engine without opening anything (engine assemblies, NINA's data, natives)
+            Check("engine (Real devices composed, nothing opened)", EngineSmoke.Run);
+
             // The real launch path (Avalonia.Native + Skia + HarfBuzz) in a child process: the headless platform below
             // registers its own text shaper, so it cannot show that Program.BuildAvaloniaApp() is complete.
             Check("native startup (Avalonia.Native, child process)", () => StartupCheck.RunInChildProcess(TimeSpan.FromSeconds(60)));

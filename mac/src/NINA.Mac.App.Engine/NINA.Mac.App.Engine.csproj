@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    M8: the Nightglass app's device services backed by the headless engine. The app (NINA.Mac.App) references this project
+    and picks Simulated or Real devices at start-up (AppSettings.DeviceSource).
+    - Contracts/: the service interfaces the view-models talk to (ICameraService, IMountService, IFocuserService,
+      ISessionService, ICentringService, IImageFolders), the settings and the clock. Moved here from NINA.Mac.App so both
+      the simulators (in the app) and the engine services (here) implement the same contracts.
+    - Engine/: the Real implementations over NINA's own engine: EngineRuntime (host contract: data folder, Application,
+      notifications), the rig profile (NINA.Profile), one HeadlessHost (NINA.Mac.Sequencing) with NINA's CameraVM over the
+      ZWO ASICamera, TelescopeVM over the LX200 driver (NINA.Mac.Equipment.Lx200), DirectGuider for mount dithers, the
+      plate solvers (NINA.Platesolving.Mac: ASTAP first, solve-field as the blind fallback), NINA.Mac.ImageAnalysis for
+      HFR and Bahtinov, and NINA.Mac.Siril's layout through NINA's file patterns.
+    Nothing here opens a device until the user connects: the camera list is gated (EngineCameraChooserGate), so composing
+    the engine never enumerates USB cameras.
+  -->
+  <PropertyGroup>
+    <RootNamespace>NINA.Mac.App.Engine</RootNamespace>
+    <AssemblyName>NINA.Mac.App.Engine</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Mac.Platform/NINA.Mac.Platform.csproj" />
+    <ProjectReference Include="../NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+    <ProjectReference Include="../NINA.WPF.Base.Mac/NINA.WPF.Base.Mac.csproj" />
+    <ProjectReference Include="../NINA.Sequencer.Mac/NINA.Sequencer.Mac.csproj" />
+    <ProjectReference Include="../NINA.Mac.Sequencing/NINA.Mac.Sequencing.csproj" />
+    <ProjectReference Include="../NINA.Mac.Lx200/NINA.Mac.Lx200.csproj" />
+    <ProjectReference Include="../NINA.Mac.Equipment.Lx200/NINA.Mac.Equipment.Lx200.csproj" />
+    <ProjectReference Include="../NINA.Mac.ImageAnalysis/NINA.Mac.ImageAnalysis.csproj" />
+    <ProjectReference Include="../NINA.Mac.Siril/NINA.Mac.Siril.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NINA.Mac.App" />
+    <InternalsVisibleTo Include="NINA.Mac.App.Test" />
+    <InternalsVisibleTo Include="NINA.Mac.App.Engine.Test" />
+  </ItemGroup>
+
+</Project>

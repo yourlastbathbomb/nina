@@ -81,6 +81,25 @@ cp -R "$publish/." "$contents/MacOS/"
 mv "$contents/MacOS/NINA.Mac.App" "$contents/MacOS/$exe"
 find "$contents/MacOS" -name '*.pdb' -delete
 
+# The headless engine (NINA.Mac.App.Engine references every engine project) brings its natives and data into the publish
+# output. The staged vendor dylibs and their licence texts arrive through NINA.Mac.Native; they ship once, in
+# Contents/Frameworks and Contents/Resources/licenses (below), so the MacOS copies go. NINA's NOVAS opens
+# <BaseDirectory>/External/JPLEPH and the catalogue database is built from <BaseDirectory>/Database/*.sql, with BaseDirectory
+# = Contents/MacOS: both become relative symlinks into Contents/Resources (mac/src/README-engine.md, NINA.Astrometry, ".app
+# bundle"). The smoke test's engine check opens them through the links (EngineData.EnsureAvailable).
+shopt -s nullglob
+for staged in "$stage"/*.dylib "$stage"/*.txt; do
+    rm -f "$contents/MacOS/$(basename "$staged")"
+done
+shopt -u nullglob
+[[ -d "$contents/MacOS/Database" ]] || fail "publish has no Database/ (NINA.Astrometry.Mac's catalogue scripts)"
+mv "$contents/MacOS/Database" "$contents/Resources/Database"
+ln -s ../Resources/Database "$contents/MacOS/Database"
+rm -rf "$contents/MacOS/External"
+mkdir -p "$contents/MacOS/External"
+ln -s ../../Resources/JPLEPH "$contents/MacOS/External/JPLEPH"
+echo "  engine data: Resources/Database ($(find "$contents/Resources/Database" -name '*.sql' | wc -l | tr -d ' ') scripts), MacOS/Database and MacOS/External/JPLEPH link into Resources"
+
 # Vendor dylibs (ZWO SDK, libusb; later libsofa/libnovas): flat in Contents/Frameworks
 shopt -s nullglob
 vendor=("$stage"/*.dylib)
@@ -147,6 +166,28 @@ while IFS= read -r line; do
         echo "  licence: ${line%%=*}"
     fi
 done <<< "$native_notices"
+# Accord.Imaging (NINA's LGPL-2.1 fork of the Accord.NET imaging library) and NINA.Mac.ImageAnalysis.Accord are built from
+# source as separate assemblies, so deps.json does not list them as packages: their notice and the LGPL text come from
+# upstream's NINA/3rd-party-licenses.txt
+accord_notice="$contents/Resources/licenses/Accord-LGPL-2.1.txt"
+python3 - "$nina/NINA/3rd-party-licenses.txt" "$accord_notice" <<'PY' || fail "Accord LGPL notice"
+import sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+head = text.index("GNU Lesser Public License v2.1")
+lines = text[head:].splitlines()
+seps = [i for i, l in enumerate(lines) if l.startswith("-----")]
+body = "\n".join(lines[seps[0] + 1:seps[1]] if len(seps) > 1 else lines[seps[0] + 1:]).strip()
+if "GNU LESSER GENERAL PUBLIC LICENSE" not in body:
+    sys.exit("LGPL text not found in " + sys.argv[1])
+intro = ("Accord.Imaging.dll (N.I.N.A.'s fork of the Accord.NET / AForge.NET imaging library, compiled from the N.I.N.A. sources)\n"
+         "and NINA.Mac.ImageAnalysis.Accord.dll (managed ports of the Accord.NET / AForge.NET imaging filters used for star detection\n"
+         "and the Bahtinov analysis) are licensed under the GNU Lesser General Public License v2.1. Both are separate, replaceable\n"
+         "assemblies in Contents/MacOS. Their source is part of this application's source (the N.I.N.A. repository, Accord.Imaging,\n"
+         "and mac/src/NINA.Mac.ImageAnalysis/Accord). Accord.NET (c) Cesar Souza and contributors; AForge.NET (c) Andrew Kirillov.\n\n")
+open(sys.argv[2], "w", encoding="utf-8").write(intro + body + "\n")
+PY
+extra_notices+=("Accord.NET imaging libraries (Accord.Imaging, NINA.Mac.ImageAnalysis.Accord), LGPL-2.1 (Resources/licenses/Accord-LGPL-2.1.txt)=$accord_notice")
+echo "  licence: Accord.NET imaging libraries (LGPL-2.1)"
 python3 "$tools" notices "$publish/NINA.Mac.App.deps.json" "$nuget" "$contents/Resources/THIRD-PARTY-NOTICES.txt" ${extra_notices[@]+"${extra_notices[@]}"} \
     | sed 's/^/  notices: /'
 python3 "$tools" icon "$contents/Resources/AppIcon.icns"
@@ -212,8 +253,19 @@ while IFS= read -r -d '' f; do
 done < <(find "$contents" -type f -print0)
 [[ "$(dwarfdump --uuid "$main" | awk '{print $2}')" == "$new_uuid" ]] || { echo "  LC_UUID not applied"; problems=$((problems + 1)); }
 [[ -z "$(xattr -r "$app" 2>/dev/null | grep com.apple.quarantine || true)" ]] || { echo "  quarantine attribute present"; problems=$((problems + 1)); }
-for required in Info.plist MacOS/"$exe" Resources/LICENSE.txt Resources/THIRD-PARTY-NOTICES.txt Resources/AppIcon.icns; do
+for required in Info.plist MacOS/"$exe" Resources/LICENSE.txt Resources/THIRD-PARTY-NOTICES.txt Resources/AppIcon.icns \
+        MacOS/NINA.Mac.App.Engine.dll MacOS/NINA.Sequencer.dll MacOS/NINA.Mac.Equipment.Lx200.dll \
+        Resources/JPLEPH Resources/Database/Initial/initial_schema.sql MacOS/External/JPLEPH MacOS/Database/Initial/initial_schema.sql; do
+    # -e follows the symlinks, so a dangling engine link counts as missing
     [[ -e "$contents/$required" ]] || { echo "  MISSING $required"; problems=$((problems + 1)); }
+done
+for link in MacOS/External/JPLEPH MacOS/Database; do
+    [[ -L "$contents/$link" ]] || { echo "  NOT A SYMLINK $link"; problems=$((problems + 1)); }
+done
+# Every staged vendor dylib ships once, in Frameworks
+for staged in "$stage"/*.dylib; do
+    [[ -e "$staged" ]] || continue
+    [[ ! -e "$contents/MacOS/$(basename "$staged")" ]] || { echo "  DUPLICATE MacOS/$(basename "$staged") (it belongs in Frameworks)"; problems=$((problems + 1)); }
 done
 # A notice for every vendor dylib and for JPLEPH
 for lib in "$contents/Frameworks"/*.dylib; do

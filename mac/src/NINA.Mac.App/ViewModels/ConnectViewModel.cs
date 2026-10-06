@@ -64,7 +64,9 @@ namespace NINA.Mac.App.ViewModels {
         public double CoolingTarget => services.Settings.Current.CoolingTargetCelsius;
 
         public string SimulationNote => services.DevicesSimulated
-            ? "Devices are simulated until the engine lands (M3/M4). The serial port list is real; nothing is opened."
+            ? services.EngineError != null
+                ? $"Real devices could not start ({services.EngineError}); the simulators run instead. The serial port list is real; nothing is opened."
+                : "Devices are simulated (Settings › Devices switches to Real). The serial port list is real; nothing is opened."
             : null;
 
         public bool CanStartNight => services.Camera.State != DeviceConnectionState.Connected || services.Mount.State != DeviceConnectionState.Connected;
@@ -79,7 +81,9 @@ namespace NINA.Mac.App.ViewModels {
                 ? $"{services.Mount.PortName ?? "simulator"} · 9600 baud"
                 : services.Mount.LastError ?? (services.Mount.PortName ?? "No USB serial adapter found");
             Focuser.State = services.Focuser.State;
-            Focuser.Detail = services.Focuser.State == DeviceConnectionState.Connected ? $"virtual position {services.Focuser.Position} ms, speed {services.Focuser.Speed}" : "follows the mount";
+            Focuser.Detail = services.Focuser.State == DeviceConnectionState.Connected
+                ? $"virtual position {services.Focuser.Position} ms, speed {services.Focuser.Speed}"
+                : services.Mount.State == DeviceConnectionState.Connected ? "did not answer through the mount" : "follows the mount";
             RefreshPortList();
             OnPropertyChanged(nameof(CanStartNight));
         }

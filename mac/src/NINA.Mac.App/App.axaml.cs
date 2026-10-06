@@ -41,11 +41,14 @@ namespace NINA.Mac.App {
 
         public override void OnFrameworkInitializationCompleted() {
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) {
-                Services = AppServices.Create();
+                // --gui-smoke shows the real window: it must never open the camera or the serial port, whatever the settings say
+                Services = AppServices.Create(new AppServicesOptions { ForceSimulatedDevices = GuiSmoke.Active != null });
                 Theme.Apply(Services.Settings.Current.NightVision);
                 var viewModel = new MainWindowViewModel(Services, Theme);
                 desktop.MainWindow = new MainWindow { DataContext = viewModel };
+                desktop.MainWindow.Closing += OnMainWindowClosing;
                 GuiSmoke.Active?.Attach(desktop, viewModel); // --gui-smoke only: watch the real window, then quit
+                desktop.ShutdownRequested += OnShutdownRequested;
                 desktop.Exit += (_, _) => Shutdown();
                 NativeMenu.SetMenu(this, BuildAppMenu(viewModel));
                 ticker = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => Services.Tick());
@@ -75,6 +78,41 @@ namespace NINA.Mac.App {
             menu.Add(settings);
             menu.Add(night);
             return menu;
+        }
+
+        private bool devicesShutDown;
+
+        /// <summary>
+        /// With Real devices, quitting first stops a run, switches the cooler off and disconnects every device (the LX200 link
+        /// sends any owed halts), then quits for real. The first request is cancelled while that runs.
+        /// </summary>
+        private async void OnShutdownRequested(object sender, ShutdownRequestedEventArgs e) {
+            if (devicesShutDown || Services?.Engine == null || sender is not IClassicDesktopStyleApplicationLifetime desktop) {
+                return;
+            }
+            e.Cancel = true;
+            devicesShutDown = true;
+            try {
+                await Services.ShutdownDevicesAsync();
+            } catch (Exception ex) {
+                Console.Error.WriteLine($"Shutting the devices down failed: {ex.Message}");
+            }
+            desktop.Shutdown();
+        }
+
+        /// <summary>Closing the main window ends the app (ShutdownMode.OnMainWindowClose): shut the Real devices down first.</summary>
+        private async void OnMainWindowClosing(object sender, WindowClosingEventArgs e) {
+            if (devicesShutDown || Services?.Engine == null || sender is not Window window) {
+                return;
+            }
+            e.Cancel = true;
+            devicesShutDown = true;
+            try {
+                await Services.ShutdownDevicesAsync();
+            } catch (Exception ex) {
+                Console.Error.WriteLine($"Shutting the devices down failed: {ex.Message}");
+            }
+            window.Close();
         }
 
         private void Shutdown() {

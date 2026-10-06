@@ -75,7 +75,9 @@ namespace NINA.Mac.App.Test.Ui {
                 TestContext.Out.WriteLine($"wall time {sw.Elapsed.TotalMilliseconds:0} ms");
                 RequireSameDisplayState(displays);
                 p.ExitCode.Should().Be(0, stdout.Result + stderr.Result);
-                stdout.Result.Should().Contain("cwd '/'").And.Contain("PASS: 12/12 checks").And.NotContain("[FAIL]");
+                stdout.Result.Should().Contain("cwd '/'").And.Contain("PASS: 13/13 checks").And.NotContain("[FAIL]");
+                // M8: the Real device services composed through the headless engine, nothing opened
+                stdout.Result.Should().Contain("[ok] engine (Real devices composed, nothing opened)").And.Contain("NINA data and ephemeris OK");
                 // The real launch path (Avalonia.Native + Skia + HarfBuzz) was set up in a child process
                 stdout.Result.Should().MatchRegex(@"\[ok\] native startup \(Avalonia\.Native, child process\) \(\d+ ms\): " + Regex.Escape(ExpectedStartup(displays)));
                 stdout.Result.Should().Contain($"settings {home}/Library/Application Support/Nightglass/settings.json");

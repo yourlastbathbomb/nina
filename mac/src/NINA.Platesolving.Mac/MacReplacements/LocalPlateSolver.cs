@@ -254,8 +254,16 @@ namespace NINA.PlateSolving.Solvers {
             return Path.Combine(Path.GetDirectoryName(imageFilePath), Path.GetFileNameWithoutExtension(imageFilePath)) + ".wcs";
         }
 
-        /// <summary>solve-field's own leftovers next to the image (source list and solved flag) and the launcher's log.</summary>
+        /// <summary>
+        /// solve-field's own leftovers next to the image (source list and solved flag) and the launcher's log. None when the frame
+        /// was never saved: CLISolver's clean-up calls this with a null path when saving the frame failed or was cancelled, and the
+        /// real outcome (a quiet failure on cancel, the save's own exception otherwise) must not turn into an ArgumentNullException
+        /// (upstream's base returns an empty list; its ASTAPSolver override has the same latent problem on every OS).
+        /// </summary>
         protected override List<string> GetSideCarFilePaths(string imageFilePath) {
+            if (string.IsNullOrEmpty(imageFilePath)) {
+                return new List<string>();
+            }
             var stem = Path.Combine(Path.GetDirectoryName(imageFilePath), Path.GetFileNameWithoutExtension(imageFilePath));
             return new List<string>() {
                 stem + ".axy",

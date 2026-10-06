@@ -18,8 +18,10 @@ using NINA.Core.Enum;
 using NINA.Core.Model;
 using NINA.Mac.Image.Test;
 using NINA.Mac.Sequencer.Test.Sim;
+using NINA.Mac.Sequencing.FieldRotation;
 using NINA.Mac.Sequencing.Planning;
 using NINA.Sequencer.Container;
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace NINA.Mac.Sequencer.Test {
@@ -53,6 +55,19 @@ namespace NINA.Mac.Sequencer.Test {
             Targets = targets
         };
 
+        /// <summary>
+        /// Angular separation in arcseconds by the haversine formula, which stays exact near zero; NINA's
+        /// <c>(a - b).Distance</c> goes through an arc cosine and returns NaN for (numerically) identical coordinates.
+        /// </summary>
+        private static double SeparationArcsec(Coordinates a, Coordinates b) {
+            a = a.Transform(Epoch.J2000);
+            b = b.Transform(Epoch.J2000);
+            var dDec = AstroUtil.ToRadians(b.Dec - a.Dec);
+            var dRa = AstroUtil.ToRadians(b.RADegrees - a.RADegrees);
+            var h = Math.Pow(Math.Sin(dDec / 2), 2) + Math.Cos(AstroUtil.ToRadians(a.Dec)) * Math.Cos(AstroUtil.ToRadians(b.Dec)) * Math.Pow(Math.Sin(dRa / 2), 2);
+            return AstroUtil.ToDegree(2 * Math.Asin(Math.Min(1, Math.Sqrt(h)))) * 3600;
+        }
+
         private static void Log(SimRig rig, NightRun run) {
             TestContext.Out.WriteLine($"run {run.Start:HH:mm:ss.fff} - {run.End:HH:mm:ss.fff}; issues: {string.Join(" | ", run.Issues)}");
             foreach (var (type, seconds, start) in rig.Camera.ExposureLog) {
@@ -80,6 +95,16 @@ namespace NINA.Mac.Sequencer.Test {
                 }
             };
 
+            // Where the mount really points when the first light starts: after centring, before the first dither moves it
+            Coordinates? atFirstLight = null;
+            var solverHook = rig.Camera.ExposureStarted;
+            rig.Camera.ExposureStarted = (sequence, start) => {
+                if (sequence.ImageType == "LIGHT") {
+                    Interlocked.CompareExchange(ref atFirstLight, rig.Mount.True, null);
+                }
+                solverHook?.Invoke(sequence, start);
+            };
+
             // The generated tree goes through NINA's JSON first: the loaded copy is what runs
             var generated = rig.Host.Generator.Generate(plan);
             var json = rig.Host.Json.Serialize(generated);
@@ -102,7 +127,10 @@ namespace NINA.Mac.Sequencer.Test {
             rig.Solver.Solver.Calls.Should().Be(2);
             rig.Mount.SyncTargets.Should().HaveCount(1);
             rig.Mount.SlewTargets.Should().HaveCount(2);
-            rig.Mount.TrueErrorArcmin(coordinates).Should().BeLessThan(1.0 / 60, "after the sync the mount points at the target (dithers moved it by a few arcseconds since)");
+            // Measured before the dithers, which are random (NINA's DitherOffsetSelector draws Gaussian offsets, sigma = DitherPixels)
+            atFirstLight.Should().NotBeNull();
+            var target = coordinates.Transform(Epoch.J2000);
+            SeparationArcsec(atFirstLight!, target).Should().BeLessThan(1, "after the sync and the re-slew the mount points at the target");
             var exposures = rig.Camera.ExposureLog.ToList();
             exposures.Where(e => e.ImageType == "SNAPSHOT").Should().HaveCount(2, "Center took one solve frame before and one after the correction");
             var lights = exposures.Where(e => e.ImageType == "LIGHT").ToList();
@@ -115,6 +143,24 @@ namespace NINA.Mac.Sequencer.Test {
             var pulseTimes = pulses.Select(p => p.At.ToLocalTime()).ToList();
             pulseTimes.Take(2).Should().OnlyContain(t => t > lights[1].Start && t < lights[2].Start);
             pulseTimes.Skip(2).Should().OnlyContain(t => t > lights[3].Start && t < lights[4].Start);
+            // After the first light only the dithers moved the mount: its true pointing moved by exactly the sum of the pulses
+            // (the simulated mount guides at 7.5205"/s on both axes; east is +RA, north +Dec)
+            double east = 0, north = 0;
+            foreach (var (direction, milliseconds, _) in pulses) {
+                var arcsec = rig.Mount.GuideRateDeclinationArcsecPerSec * milliseconds / 1000.0;
+                switch (direction) {
+                    case GuideDirections.guideEast: east += arcsec; break;
+                    case GuideDirections.guideWest: east -= arcsec; break;
+                    case GuideDirections.guideNorth: north += arcsec; break;
+                    case GuideDirections.guideSouth: north -= arcsec; break;
+                }
+            }
+            var final = rig.Mount.True;
+            var movedEast = AstroUtil.EuclidianModulus(final.RADegrees - atFirstLight!.RADegrees + 180, 360) - 180;
+            TestContext.Out.WriteLine(string.Format(CultureInfo.InvariantCulture, "centring error {0:0.000}\", dither sum east {1:0.00}\" north {2:0.00}\", final error {3:0.00}\"",
+                SeparationArcsec(atFirstLight, target), east, north, SeparationArcsec(final, target)));
+            (movedEast * Math.Cos(AstroUtil.ToRadians(atFirstLight.Dec)) * 3600).Should().BeApproximately(east, 0.01, "east/west: the sum of the dither pulses");
+            ((final.Dec - atFirstLight.Dec) * 3600).Should().BeApproximately(north, 0.01, "north/south: the sum of the dither pulses");
 
             // Files: the profile's pattern $$TARGETNAME$$\$$IMAGETYPE$$\$$TARGETNAME$$_$$EXPOSURETIME$$s_G$$GAIN$$_$$FRAMENR$$
             files.Should().Equal(Enumerable.Range(0, 6).Select(i => $"NGC 0001 test/LIGHT/NGC 0001 test_2.00s_G252_{i:0000}.fits"));
@@ -178,6 +224,15 @@ namespace NINA.Mac.Sequencer.Test {
             // Up to 12 of the 2 s subs fit before the keyhole, so 20 always leave several for the west side
             var target = Target("Keyhole wait test", coordinates, exposure: 2, count: 20) with { MaxAltitudeDeg = limit, Keyhole = KeyholePolicy.WaitUntilBelow };
             var root = rig.Host.Generator.Generate(Night("Keyhole wait", target));
+            // When each slew ended (the simulated mount reports every pointing change)
+            var slewEnds = new ConcurrentQueue<DateTime>();
+            var slewsSeen = 0;
+            rig.Mount.PointingChanged = () => {
+                var slews = rig.Mount.SlewTargets.Count;
+                if (Interlocked.Exchange(ref slewsSeen, slews) < slews) {
+                    slewEnds.Enqueue(DateTime.Now);
+                }
+            };
 
             var run = await NightRun.Run(root, TimeSpan.FromMinutes(3));
             Log(rig, run);
@@ -192,9 +247,43 @@ namespace NINA.Mac.Sequencer.Test {
             (east.Count + west.Count).Should().Be(20, "no exposure starts while the target is above the limit");
             east.Should().HaveCountGreaterThan(3, "the target is imaged east of the meridian until it climbs into the keyhole");
             west.Should().HaveCountGreaterThan(3, "and west of it once it has sunk below the limit again");
-            west.First().Start.Should().BeBefore(keyholeEnd.AddSeconds(1.6), "WaitForAltitude checks the altitude once a second");
-            rig.Mount.SlewTargets.Should().HaveCount(1, "the block was held, not restarted: one slew in Prepare");
+            // The mount tracked through the keyhole, so the keyhole trigger re-slews (centres, when centring is on) after the wait
+            // (review M7-3): one slew in Prepare, one after the keyhole, before the first west light
+            rig.Mount.SlewTargets.Should().HaveCount(2, "Prepare's slew, and the re-slew after the keyhole; the block was held, not restarted");
+            var reslew = slewEnds.Last();
+            TestContext.Out.WriteLine($"re-slew ended {reslew:HH:mm:ss.fff}, first west light {west.First().Start:HH:mm:ss.fff}");
+            reslew.Should().BeAfter(keyholeEnd.AddMilliseconds(-100), "the re-slew comes after the wait");
+            reslew.Should().BeOnOrBefore(west.First().Start, "and before the first light west of the meridian");
+            SeparationArcsec(rig.Mount.ReportedJ2000, coordinates).Should().BeLessThan(1, "the re-slew went to the target");
+            west.First().Start.Should().BeBefore(keyholeEnd.AddSeconds(2.5), "WaitForAltitude checks the altitude once a second, then the re-slew (0.3 s in the simulator) and NINA's wait for the next mount update after it (0.5 s polling)");
             rig.Mount.Parks.Should().Be(1, "the end area still runs");
+        }
+
+        [Test]
+        public async Task FieldRotationStop_IsJudgedAtTheLightsBinning_NotAtThePlateSolveBinningCenterLeftTheCameraAt() {
+            // Review M7-1: Center's solve frames use NINA's default PlateSolveSettings.Binning = 1, which leaves the camera at bin 1.
+            // A Stop predicate on the camera-binning symbol then saw the bin-1 limit (half the bin-2 one) and skipped the whole block
+            var now = DateTime.Now;
+            // Dec 0 rising at 62 degrees (azimuth about 140): the 1 px limit is about 8.2 s at bin 2 and 4.1 s at bin 1
+            var coordinates = Sky.TargetAt(62, rising: true, decDeg: 0, now);
+            var azimuth = Sky.Azimuth(coordinates, now);
+            var bin2 = FieldRotationSymbols.MaxSub(Sky.Latitude, 62, azimuth, 3840, 2160, 2, 1.0);
+            var bin1 = FieldRotationSymbols.MaxSub(Sky.Latitude, 62, azimuth, 3840, 2160, 1, 1.0);
+            TestContext.Out.WriteLine(string.Format(CultureInfo.InvariantCulture, "azimuth {0:0.0}: max sub {1:0.00} s at bin 2, {2:0.00} s at bin 1", azimuth, bin2, bin1));
+            const double sub = 6.2;
+            bin1.Should().BeLessThan(sub, "the case discriminates: at the solve binning the sub is too long");
+            bin2.Should().BeGreaterThan(sub + 1, "at the lights' binning it fits, with margin for the target's motion during the run");
+            await using var rig = await SimRig.Create("rotation binning", coordinates, gotoErrorRaArcmin: 3, gotoErrorDecArcmin: 2,
+                nighttime: new FixedNighttimeCalculator(now.AddHours(1)), configure: p => p.PlateSolveSettings.Binning = 1);
+            var target = Target("Rotation binning test", coordinates, exposure: sub, count: 2) with { CenterFirst = true, FieldRotation = FieldRotationPolicy.Stop };
+            var root = rig.Host.Generator.Generate(Night("Rotation binning", target));
+
+            var run = await NightRun.Run(root, TimeSpan.FromMinutes(2));
+            Log(rig, run);
+
+            run.Issues.Should().BeEmpty();
+            rig.Camera.ExposureLog.Should().Contain(e => e.ImageType == "SNAPSHOT", "Center took its solve frames (at bin 1)");
+            rig.Camera.ExposureLog.Where(e => e.ImageType == "LIGHT").Should().HaveCount(2, "the lights fit the field-rotation limit at their own binning, 2");
         }
 
         [Test]

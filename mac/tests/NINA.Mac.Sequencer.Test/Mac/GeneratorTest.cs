@@ -81,10 +81,12 @@ namespace NINA.Mac.Sequencer.Test {
                 "        [condition] TimeCondition Provider=NauticalDawnProvider MinutesOffset=-10\n" +
                 "        [condition] AboveHorizonCondition Offset=2\n" +
                 "        [condition] AltitudeCondition Offset=25\n" +
-                "        [condition] LoopWhile Predicate=\"FieldRotation_MaxSub >= 10\"\n" +
+                "        [condition] LoopWhile Predicate=\"FieldRotation_MaxSubBin1 * 2 >= 10\"\n" +
+                "        [trigger] KeyholeTrigger MaxAltitude=72\n" +
+                "          WaitForAltitude AboveOrBelow=< Offset=72\n" +
+                "          Center Inherited=True\n" +
                 "        [trigger] DitherAfterExposures AfterExposures=5\n" +
                 "        [trigger] CenterAfterDriftTrigger DistanceArcMinutes=1.5 AfterExposures=5\n" +
-                "        WaitForAltitude AboveOrBelow=< Offset=72\n" +
                 "        TakeExposure ExposureTime=10 Gain=252 Offset=15 Binning=2x2 ImageType=LIGHT\n" +
                 "    DeepSkyObjectContainer \"M 83\" target \"M 83\" RA 13.617 h Dec -29.866\n" +
                 "      SequentialContainer \"Prepare M 83\"\n" +
@@ -139,7 +141,7 @@ namespace NINA.Mac.Sequencer.Test {
         }
 
         [Test]
-        public void KeyholePolicies_SkipEndsTheBlock_WaitUntilBelowHoldsItBeforeEveryExposure() {
+        public void KeyholePolicies_SkipEndsTheBlock_WaitUntilBelowWaitsItOutAndRecentresBeforeTheNextExposure() {
             TargetPlan Target(KeyholePolicy keyhole) => new TargetPlan { Name = "K", Coordinates = M83, Count = 10, MaxAltitudeDeg = 70, Keyhole = keyhole, DitherEvery = 0, RecenterArcmin = 0 };
             var skip = TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(KeyholePolicy.Skip) } }));
             skip.Should().Contain(
@@ -151,7 +153,8 @@ namespace NINA.Mac.Sequencer.Test {
                 "        TakeExposure ExposureTime=10 Gain=-1 Offset=-1 Binning=2x2 ImageType=LIGHT\n");
             skip.Should().NotContain("WaitForAltitude");
 
-            // One loop, one count for both sides of the meridian; no MaxAltitudeCondition, which would end the block
+            // One loop, one count for both sides of the meridian; no MaxAltitudeCondition, which would end the block. The keyhole
+            // trigger waits it out and then centres again, because the mount tracked through the keyhole meanwhile
             var wait = TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(KeyholePolicy.WaitUntilBelow) } }));
             wait.Should().Contain(
                 "      SequentialContainer \"Prepare K\"\n" +
@@ -164,18 +167,65 @@ namespace NINA.Mac.Sequencer.Test {
                 "        [condition] LoopCondition Iterations=10\n" +
                 "        [condition] TimeCondition Provider=DawnProvider MinutesOffset=0\n" +
                 "        [condition] AboveHorizonCondition Offset=0\n" +
-                "        WaitForAltitude AboveOrBelow=< Offset=70\n" +
+                "        [trigger] KeyholeTrigger MaxAltitude=70\n" +
+                "          WaitForAltitude AboveOrBelow=< Offset=70\n" +
+                "          Center Inherited=True\n" +
                 "        TakeExposure ExposureTime=10 Gain=-1 Offset=-1 Binning=2x2 ImageType=LIGHT\n");
             wait.Should().NotContain("MaxAltitudeCondition");
+
+            // Not centring: the trigger re-slews instead
+            var slew = TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(KeyholePolicy.WaitUntilBelow) with { CenterFirst = false } } }));
+            slew.Should().Contain(
+                "        [trigger] KeyholeTrigger MaxAltitude=70\n" +
+                "          WaitForAltitude AboveOrBelow=< Offset=70\n" +
+                "          SlewScopeToRaDec\n");
         }
 
         [Test]
-        public void FieldRotationStop_ScalesTheOnePixelLimit_ByTheTargetsBlurTolerance() {
+        public void KeyholeTrigger_InstructionsInheritTheTarget_AndTheTriggerFiresOnlyAboveTheLimitBeforeALight() {
+            var root = rig.Host.Generator.Generate(new NightPlan { Targets = new[] {
+                new TargetPlan { Name = "K", Coordinates = M83, Count = 10, MaxAltitudeDeg = 70, Keyhole = KeyholePolicy.WaitUntilBelow } } });
+            var entities = new List<ISequenceEntity>();
+            HeadlessSequenceRunner.Walk(root, entities.Add);
+            var keyhole = entities.OfType<NINA.Mac.Sequencing.Triggers.KeyholeTrigger>().Single();
+            var instructions = keyhole.TriggerRunner.GetItemsSnapshot();
+            var wait = instructions.OfType<NINA.Sequencer.SequenceItem.Utility.WaitForAltitude>().Single();
+            wait.Inherited.Should().BeTrue("the wait takes the target's coordinates through the trigger's context");
+            wait.Data.Coordinates.Coordinates.RA.Should().BeApproximately(M83.RA, 1e-6);
+            wait.Data.Coordinates.Coordinates.Dec.Should().BeApproximately(M83.Dec, 1e-6);
+            instructions.OfType<NINA.Sequencer.SequenceItem.Platesolving.Center>().Single().Inherited.Should().BeTrue();
+            keyhole.Validate();
+            keyhole.Issues.Should().NotContain(i => i.Contains("needs a target"));
+
+            var light = entities.OfType<NINA.Sequencer.SequenceItem.Imaging.TakeExposure>().Single();
+            var altitude = keyhole.CurrentAltitude();
+            double.IsNaN(altitude).Should().BeFalse();
+            keyhole.MaxAltitude = altitude + 1;
+            keyhole.ShouldTrigger(null, light).Should().BeFalse("the target is below the limit");
+            keyhole.MaxAltitude = altitude - 1;
+            keyhole.ShouldTrigger(null, light).Should().BeTrue("the target is above the limit");
+            keyhole.ShouldTrigger(null, wait).Should().BeFalse("only before a light frame");
+            light.ImageType = "DARK";
+            keyhole.ShouldTrigger(null, light).Should().BeFalse("only before a light frame");
+
+            var clone = (NINA.Mac.Sequencing.Triggers.KeyholeTrigger)keyhole.Clone();
+            clone.MaxAltitude.Should().Be(keyhole.MaxAltitude);
+            clone.TriggerRunner.GetItemsSnapshot().Select(i => i.GetType()).Should().Equal(instructions.Select(i => i.GetType()));
+            clone.TriggerRunner.Should().NotBeSameAs(keyhole.TriggerRunner);
+        }
+
+        [Test]
+        public void FieldRotationStop_ScalesTheBin1Limit_ByTheTargetsBlurToleranceAndPlannedBinning() {
+            // The bin-1 symbol, never the camera-binning one: Center's solve frames change the camera's binning (review M7-1)
             TargetPlan Target(double blur) => new TargetPlan { Name = "R", Coordinates = M83, ExposureSeconds = 12.5, FieldRotation = FieldRotationPolicy.Stop, BlurTolerancePx = blur };
             TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(1) } }))
-                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSub >= 12.5\"\n");
+                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSubBin1 * 2 >= 12.5\"\n", "1 px at the default bin 2");
             TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(2.5) } }))
-                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSub * 2.5 >= 12.5\"\n");
+                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSubBin1 * 5 >= 12.5\"\n", "2.5 px at bin 2");
+            TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(1) with { Binning = 1 } } }))
+                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSubBin1 >= 12.5\"\n", "1 px at bin 1");
+            TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(1.5) with { Binning = 3 } } }))
+                .Should().Contain("[condition] LoopWhile Predicate=\"FieldRotation_MaxSubBin1 * 4.5 >= 12.5\"\n");
             TreeDump.Of(rig.Host.Generator.Generate(new NightPlan { Targets = new[] { Target(1) with { FieldRotation = FieldRotationPolicy.Warn } } }))
                 .Should().NotContain("LoopWhile", "Warn (decision 4's default) adds nothing to the sequence");
         }
@@ -223,6 +273,14 @@ namespace NINA.Mac.Sequencer.Test {
             generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MaxAltitudeDeg = 91 } } })).Should().Throw<ArgumentException>();
             generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { DitherEvery = -1 } } })).Should().Throw<ArgumentException>();
             generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { BlurTolerancePx = 0 } } })).Should().Throw<ArgumentException>();
+            // Contradictory altitude limits would never image (review M7-6)
+            generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MinAltitudeDeg = 80, MaxAltitudeDeg = 70 } } }))
+                .Should().Throw<ArgumentException>().WithMessage("*minimum altitude (80°) must be below the maximum altitude (70°)*");
+            generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MinAltitudeDeg = 75 } } }))
+                .Should().Throw<ArgumentException>("equal limits leave no altitude to image at");
+            generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MinAltitudeDeg = -91 } } })).Should().Throw<ArgumentException>();
+            generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MinAltitudeDeg = double.NaN } } })).Should().Throw<ArgumentException>();
+            generator.Invoking(g => g.Generate(new NightPlan { Targets = new[] { ok with { MinAltitudeDeg = 74.9 } } })).Should().NotThrow();
         }
     }
 }

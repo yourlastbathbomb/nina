@@ -79,6 +79,12 @@ namespace NINA.Mac.Platform {
 
         public string SettingsFile => Path.Combine(SettingsDirectory, "settings.json");
 
+        /// <summary>
+        /// The headless engine's data folder (NINA's CoreUtil.APPLICATIONTEMPPATH with Real devices): NINA's logs, the rig
+        /// profile, the plate solvers' working files and the catalogue database, kept apart from the app's own settings.
+        /// </summary>
+        public string EngineDataDirectory => Path.Combine(SettingsDirectory, "Engine");
+
         public string LogsDirectory { get; }
 
         public string CachesDirectory { get; }

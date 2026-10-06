@@ -16,6 +16,7 @@ using NINA.Astrometry;
 using NINA.Core.Model.Equipment;
 using NINA.Equipment.Model;
 using NINA.Mac.Sequencing.Conditions;
+using NINA.Mac.Sequencing.Triggers;
 using NINA.Profile.Interfaces;
 using NINA.Sequencer;
 using NINA.Sequencer.Conditions;
@@ -47,15 +48,20 @@ namespace NINA.Mac.Sequencing.Planning {
     /// │     ├─ SequentialContainer "Prepare"      [LoopCondition 1, TimeCondition dawn, MaxAltitude (keyhole Skip)]
     /// │     │     WaitUntilAboveHorizon, WaitForAltitude &gt; min?, WaitForAltitude &lt; max (keyhole WaitUntilBelow)?, Center (or a slew)
     /// │     └─ SequentialContainer "Imaging"      [LoopCondition N?, TimeCondition dawn, AboveHorizon, MaxAltitude (keyhole Skip)?,
-    /// │           WaitForAltitude &lt; max?          AltitudeCondition min?, LoopWhile FieldRotation_MaxSub [* B] &gt;= T (Stop)?]
-    /// │           TakeExposure LIGHT              [DitherAfterExposures k?, CenterAfterDriftTrigger arcmin/n?]
+    /// │           TakeExposure LIGHT               AltitudeCondition min?, LoopWhile FieldRotation_MaxSubBin1 [* B*b] &gt;= T (Stop)?]
+    /// │                                           [KeyholeTrigger max { WaitForAltitude &lt; max, Center } (WaitUntilBelow)?,
+    /// │                                            DitherAfterExposures k?, CenterAfterDriftTrigger arcmin/n?]
     /// └─ EndAreaContainer:     WarmCamera?  DewHeater(off)?  ParkScope?  ExternalScript?
     /// </code>
     /// The keyhole policies differ only in the Imaging block: Skip ends it when the target climbs above the maximum altitude
-    /// (MaxAltitudeCondition, whose watchdog also interrupts a running exposure); WaitUntilBelow keeps it and puts a
-    /// WaitForAltitude &lt; max before every exposure, which passes at once while the target is at or below the limit and
-    /// otherwise holds the loop until the target has crossed the meridian and sunk below it again: the target is imaged east of
-    /// the meridian, waits out the keyhole, and is imaged west of it, with one exposure count (LoopCondition) for both sides.
+    /// (MaxAltitudeCondition, whose watchdog also interrupts a running exposure); WaitUntilBelow keeps it and puts the fork's
+    /// KeyholeTrigger on it, which before a light frame does nothing while the target is at or below the limit and otherwise
+    /// runs its instructions: a WaitForAltitude &lt; max, which holds the loop until the target has crossed the meridian and sunk
+    /// below the limit again, then a Center (a slew if the target is not centred), because the mount tracked through the
+    /// keyhole meanwhile. The target is imaged east of the meridian, waits out the keyhole, is centred again, and is imaged
+    /// west of it, with one exposure count (LoopCondition) for both sides.
+    /// The field-rotation Stop compares the planned sub with FieldRotation_MaxSubBin1 (the 1 px limit at bin 1) times the
+    /// blur tolerance and the planned binning, never with the camera's current binning, which Center's solve frames change.
     /// Every entity comes from the factory (a clone of the catalogue's prototype, so it carries its services and metadata), and
     /// only the generated values are set, through the entities' own properties. Containers are attached to their parent before
     /// their children are added, so each child's AfterParentChanged sees the deep-sky object's coordinates, as when a user
@@ -191,11 +197,27 @@ namespace NINA.Mac.Sequencing.Planning {
             }
             if (t.FieldRotation == FieldRotationPolicy.Stop) {
                 var rotation = Get(factory.GetCondition<LoopWhile>());
-                // FieldRotation_MaxSub is the limit for 1 px of corner blur; the limit grows linearly with the allowed blur
-                rotation.PredicateExpression.Definition = t.BlurTolerancePx == 1
-                    ? string.Format(CultureInfo.InvariantCulture, "{0} >= {1}", FieldRotation.FieldRotationSymbols.MaxSubSymbol, t.ExposureSeconds)
-                    : string.Format(CultureInfo.InvariantCulture, "{0} * {1} >= {2}", FieldRotation.FieldRotationSymbols.MaxSubSymbol, t.BlurTolerancePx, t.ExposureSeconds);
+                // FieldRotation_MaxSubBin1 is the limit for 1 unbinned pixel of corner blur; the limit grows linearly with the allowed
+                // blur and with the binning. The planned binning, not the camera's current one: Center's solve frames use the
+                // plate-solve binning, and a camera-binning symbol would end the block after every centring at another binning
+                var factor = t.BlurTolerancePx * t.Binning;
+                rotation.PredicateExpression.Definition = factor == 1
+                    ? string.Format(CultureInfo.InvariantCulture, "{0} >= {1}", FieldRotation.FieldRotationSymbols.MaxSubBin1Symbol, t.ExposureSeconds)
+                    : string.Format(CultureInfo.InvariantCulture, "{0} * {1} >= {2}", FieldRotation.FieldRotationSymbols.MaxSubBin1Symbol, factor, t.ExposureSeconds);
                 imaging.Add(rotation);
+            }
+            if (t.Keyhole == KeyholePolicy.WaitUntilBelow) {
+                // Before every light frame: wait out the keyhole if the target is in it, then centre again (first, so that a dither
+                // or drift check due at the same frame runs after the recentre, not before the wait)
+                var keyhole = Get(factory.GetTrigger<KeyholeTrigger>());
+                keyhole.MaxAltitude = t.MaxAltitudeDeg;
+                // Attached first, so its instruction list has the target's context when the instructions are added
+                imaging.Add(keyhole);
+                var below = Get(factory.GetItem<WaitForAltitude>());
+                keyhole.TriggerRunner.Add(below);
+                below.AboveOrBelow = "<";
+                below.Offset = t.MaxAltitudeDeg;
+                keyhole.TriggerRunner.Add(t.CenterFirst ? Get(factory.GetItem<Center>()) : Get(factory.GetItem<SlewScopeToRaDec>()));
             }
             if (t.DitherEvery > 0) {
                 var dither = Get(factory.GetTrigger<DitherAfterExposures>());
@@ -214,10 +236,6 @@ namespace NINA.Mac.Sequencing.Planning {
             exposure.Offset = t.Offset;
             exposure.Binning = new BinningMode(t.Binning, t.Binning);
             exposure.ImageType = CaptureSequence.ImageTypes.LIGHT;
-            if (t.Keyhole == KeyholePolicy.WaitUntilBelow) {
-                // Before every exposure: hold the loop while the target is in the keyhole (passes at once below the limit)
-                AddWaitBelowMaximum(imaging, t);
-            }
             imaging.Add(exposure);
         }
 
@@ -277,6 +295,15 @@ namespace NINA.Mac.Sequencing.Planning {
                 }
                 if (!(t.MaxAltitudeDeg > 0 && t.MaxAltitudeDeg <= 90)) {
                     throw new ArgumentException($"Target {t.Name}: the maximum altitude must be in (0, 90]", nameof(plan));
+                }
+                if (t.MinAltitudeDeg is double min && !(min >= -90 && min <= 90)) {
+                    throw new ArgumentException($"Target {t.Name}: the minimum altitude must be in [-90, 90]", nameof(plan));
+                }
+                if (t.MinAltitudeDeg is double low && low >= t.MaxAltitudeDeg) {
+                    // Nothing could ever be imaged: the block would wait for "above min" and then stop (Skip) or wait (WaitUntilBelow)
+                    // for "below max" at once
+                    throw new ArgumentException(string.Format(CultureInfo.InvariantCulture,
+                        "Target {0}: the minimum altitude ({1}°) must be below the maximum altitude ({2}°)", t.Name, low, t.MaxAltitudeDeg), nameof(plan));
                 }
                 if (!(t.BlurTolerancePx > 0)) {
                     throw new ArgumentException($"Target {t.Name}: the blur tolerance must be positive", nameof(plan));

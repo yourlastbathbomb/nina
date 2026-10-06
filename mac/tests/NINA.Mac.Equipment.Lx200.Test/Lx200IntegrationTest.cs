@@ -128,7 +128,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             var settings = new Lx200Settings(profileService.Object);
 
             settings.PortPath.Should().BeEmpty();
-            settings.PulseStrategy.Should().Be(Lx200PulseStrategy.Auto);
+            settings.PulseStrategy.Should().Be(Lx200PulseStrategy.NativePulse, "':Mg' was measured to work in alt-az on this rig's firmware 4.0g (M2 read-out)");
             settings.GuideRateArcsecPerSec.Should().Be(10.0);
             settings.SerializePulseAxes.Should().BeTrue();
             settings.MaxSyncOffsetDegrees.Should().Be(3.0);

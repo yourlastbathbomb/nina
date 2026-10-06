@@ -15,6 +15,7 @@
 using NINA.Core.Locale;
 using NINA.Core.Utility;
 using NINA.Mac.Sequencing.Conditions;
+using NINA.Mac.Sequencing.Triggers;
 using NINA.Sequencer;
 using NINA.Sequencer.Conditions;
 using NINA.Sequencer.Container;
@@ -169,6 +170,7 @@ namespace NINA.Mac.Sequencing.Catalogue {
             });
             Add(() => new ReconnectTrigger(s.ProfileService, s.Camera, s.FilterWheel, s.Focuser, s.Rotator, s.Telescope, s.Guider, s.Switch, s.FlatDevice, s.WeatherData, s.Dome, s.SafetyMonitor));
             Add(() => new ReconnectOnDownloadFailure(s.ProfileService, s.Camera, s.Sequence));
+            Add(() => new KeyholeTrigger(s.ProfileService));
 
             Sort(Items);
             Sort(Conditions);

@@ -20,7 +20,8 @@ namespace NINA.Mac.App.Services.Simulation {
 
     /// <summary>
     /// Flats (auto-exposure to a target mean, like NINA's AutoExposureFlat), the dark library (only at the cooler
-    /// setpoint) and biases. Uses whatever <see cref="ICameraService"/> it is given.
+    /// setpoint) and biases. Uses whatever <see cref="ICameraService"/> it is given: the simulator, or the engine camera,
+    /// which saves the kept frames through NINA's file patterns (the trial flats are not kept).
     /// </summary>
     public sealed class SimulatedCalibration : ICalibrationService {
 
@@ -77,7 +78,7 @@ namespace NINA.Mac.App.Services.Simulation {
             for (var attempt = 1; attempt <= 8; attempt++) {
                 Report($"Flat auto-exposure: trying {exposure:0.###} s", 0);
                 // Trial flats (panel on), like AutoExposureFlat; they are not kept
-                var test = await camera.ExposeAsync(new ExposureRequest(FrameType.Flat, exposure, plan.Gain, plan.Offset, plan.Bin), ct);
+                var test = await camera.ExposeAsync(new ExposureRequest(FrameType.Flat, exposure, plan.Gain, plan.Offset, plan.Bin) { Keep = false }, ct);
                 var mean = Math.Max(1e-4, test.MeanAduFraction);
                 if (Math.Abs(mean - plan.FlatTargetFraction) <= 0.03) {
                     break;

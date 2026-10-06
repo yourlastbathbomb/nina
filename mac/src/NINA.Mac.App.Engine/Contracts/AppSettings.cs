@@ -53,11 +53,54 @@ namespace NINA.Mac.App.Services {
         public OpticsSettings Clone() => (OpticsSettings)MemberwiseClone();
     }
 
+    /// <summary>Which implementation backs the device services (Settings › Devices). Read at start-up.</summary>
+    public enum DeviceSource {
+
+        /// <summary>The built-in simulators: nothing is opened (indoor development). The default until the hardware path is proven.</summary>
+        Simulated,
+
+        /// <summary>The headless engine: NINA's ZWO camera driver, the LX200 driver on the selected serial port, the plate solvers.</summary>
+        Real,
+    }
+
+    /// <summary>Plate solving with Real devices (NINA.Platesolving.Mac): ASTAP near solves, solve-field as the blind fallback.</summary>
+    public sealed class SolverSettings {
+
+        /// <summary>The ASTAP command-line solver; "~/" is the home folder.</summary>
+        public string AstapExecutable { get; set; } = "~/Astro/astap/cli/astap_cli";
+
+        /// <summary>ASTAP's star database folder (D80), passed as -d through a launcher script.</summary>
+        public string AstapDatabase { get; set; } = "~/Astro/astap/d80";
+
+        /// <summary>Folder holding astrometry.net's solve-field and wcsinfo (Homebrew).</summary>
+        public string AstrometryBinDirectory { get; set; } = "/opt/homebrew/bin";
+
+        /// <summary>Centring is done when the solved centre is within this many arcminutes of the target.</summary>
+        public double CentreThresholdArcmin { get; set; } = 1.0;
+
+        /// <summary>During a run, recentre when a drift check finds the frame this far off; 0 switches drift checks off.</summary>
+        public double RecenterArcmin { get; set; } = 1.5;
+
+        public SolverSettings Clone() => (SolverSettings)MemberwiseClone();
+    }
+
     /// <summary>User settings, stored as JSON in ~/Library/Application Support/&lt;app&gt;/settings.json.</summary>
     public sealed class AppSettings {
         public int SchemaVersion { get; set; } = 1;
         public SiteSettings Site { get; set; } = new();
         public OpticsSettings Optics { get; set; } = new();
+
+        /// <summary>Simulated (default) or Real devices; takes effect at the next start of the app.</summary>
+        [JsonConverter(typeof(JsonStringEnumConverter<DeviceSource>))]
+        public DeviceSource DeviceSource { get; set; } = DeviceSource.Simulated;
+
+        public SolverSettings Solver { get; set; } = new();
+
+        /// <summary>Focus frames use the ZWO mono-bin mode at bin 2+ (Real camera only).</summary>
+        public bool FocusMonoBin { get; set; } = true;
+
+        /// <summary>A run first centres the target by plate solving (Real devices); otherwise it only slews.</summary>
+        public bool CentreBeforeRun { get; set; } = true;
 
         /// <summary>Null means the default ~/Astro/&lt;app&gt;.</summary>
         public string ImagesRoot { get; set; }
@@ -92,6 +135,7 @@ namespace NINA.Mac.App.Services {
             var copy = (AppSettings)MemberwiseClone();
             copy.Site = Site.Clone();
             copy.Optics = Optics.Clone();
+            copy.Solver = (Solver ?? new SolverSettings()).Clone();
             return copy;
         }
 
@@ -168,6 +212,7 @@ namespace NINA.Mac.App.Services {
                 var settings = JsonSerializer.Deserialize(File.ReadAllText(filePath), SettingsJsonContext.Default.AppSettings) ?? new AppSettings();
                 settings.Site ??= new SiteSettings();
                 settings.Optics ??= new OpticsSettings();
+                settings.Solver ??= new SolverSettings();
                 return settings;
             } catch (Exception ex) when (ex is JsonException || ex is IOException || ex is NotSupportedException) {
                 var bad = filePath + ".bad";

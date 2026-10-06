@@ -63,6 +63,9 @@ namespace NINA.Mac.App.Services.Simulation {
 
         public bool IsSimulated => true;
 
+        /// <summary>The simulated sensor never freezes.</summary>
+        public string HealthWarning => null;
+
         public event EventHandler Changed;
 
         public DeviceConnectionState State {

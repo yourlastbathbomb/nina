@@ -16,6 +16,7 @@ using FluentAssertions;
 using Moq;
 using NINA.Astrometry;
 using NINA.Core.Enum;
+using NINA.Image.Interfaces;
 using NINA.PlateSolving;
 using NINA.PlateSolving.Interfaces;
 using NINA.PlateSolving.Mac;
@@ -114,6 +115,48 @@ namespace NINA.Mac.Platesolving.Test {
             solver.SideCars("/w/a b.fits").Should().Equal("/w/a b.axy", "/w/a b.solved", "/w/a b.solve-field.log");
             LocalPlateSolver.GetTempDirectory("/w/a b.fits").Should().Be("/w/a b.solve-field-tmp");
             solver.Timeout.Should().Be(AstrometryNetSetup.SolverTimeout);
+        }
+
+        [Test]
+        public void SideCars_OfAFrameThatWasNeverSaved_AreNone() {
+            // CLISolver's clean-up asks with a null path when saving the frame failed or was cancelled (review PS-1)
+            var solver = new TestableLocalPlateSolver("");
+            solver.SideCars(null!).Should().BeEmpty();
+            solver.SideCars(string.Empty).Should().BeEmpty();
+        }
+
+        /// <summary>A frame whose save to NINA's working folder throws, as a cancelled or failing SaveToDisk does.</summary>
+        private static IImageData FrameWhoseSaveThrows(Exception exception) {
+            var real = SolverKit.SmallImage("LocalSaveFails");
+            var image = new Mock<IImageData>();
+            image.SetupGet(i => i.Properties).Returns(real.Properties);
+            image.SetupGet(i => i.MetaData).Returns(real.MetaData);
+            image.Setup(i => i.SaveToDisk(It.IsAny<NINA.Image.FileFormat.FileSaveInfo>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+                .Returns(Task.FromException<string>(exception));
+            return image.Object;
+        }
+
+        [Test]
+        public async Task SolveAsync_CancelledWhileSavingTheFrame_IsAQuietFailure() {
+            var bin = StandIns(SolveFieldMode.Success);
+            IPlateSolver solver = new TestableLocalPlateSolver(bin);
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+
+            var result = await solver.SolveAsync(FrameWhoseSaveThrows(new OperationCanceledException(cancelled.Token)), SolverKit.RigParameter(M51), null, cancelled.Token);
+
+            result.Success.Should().BeFalse("as upstream's CLISolver reports a cancelled solve; the clean-up must not throw ArgumentNullException");
+            File.Exists(Path.Combine(folder, "solve-field argv.txt")).Should().BeFalse("solve-field never ran");
+        }
+
+        [Test]
+        public async Task SolveAsync_WhenSavingTheFrameFails_ThrowsTheSavesOwnException() {
+            var bin = StandIns(SolveFieldMode.Success);
+            IPlateSolver solver = new TestableLocalPlateSolver(bin);
+
+            Func<Task> solve = () => solver.SolveAsync(FrameWhoseSaveThrows(new IOException("disk full")), SolverKit.RigParameter(M51), null, CancellationToken.None);
+
+            await solve.Should().ThrowExactlyAsync<IOException>().WithMessage("disk full");
         }
 
         [Test]

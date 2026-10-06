@@ -37,9 +37,11 @@ namespace NINA.Mac.App.Services {
     }
 
     /// <summary>
-    /// Common shape of the device services. The view-models only talk to these interfaces; today they are backed by
-    /// simulators, later by the headless engine (NINA's ASICamera + the native LX200 driver, M3/M4).
-    /// Events are raised on the thread that caused the change (the UI thread in the app).
+    /// Common shape of the device services. The view-models only talk to these interfaces. They are backed either by the
+    /// simulators (NINA.Mac.App, Services/Simulation) or by the headless engine (NINA.Mac.App.Engine: NINA's ASICamera, the
+    /// native LX200 driver, NINA's sequencer); Settings › Devices picks one at start-up.
+    /// Events are raised on the UI thread in the app: the simulators raise them on the thread that caused the change (the UI
+    /// thread), the engine services post them to the synchronization context they were created on.
     /// </summary>
     public interface IDeviceService {
 
@@ -61,10 +63,27 @@ namespace NINA.Mac.App.Services {
 
     public sealed record CameraInfo(string Model, int Width, int Height, double PixelSizeMicrons, string BayerPattern, IReadOnlyList<int> Bins, bool HasCooler, double MaxCoolingDelta);
 
-    public sealed record ExposureRequest(FrameType Type, double Seconds, int Gain, int Offset, int Bin);
+    public sealed record ExposureRequest(FrameType Type, double Seconds, int Gain, int Offset, int Bin) {
+
+        /// <summary>
+        /// Save the frame (Real devices: through NINA's file patterns into the Siril layout). Lights, darks, flats and biases
+        /// are saved unless this is false (e.g. the trial frames of the flat auto-exposure); snapshots are never saved.
+        /// </summary>
+        public bool Keep { get; init; } = true;
+
+        /// <summary>ZWO mono-bin (the colour camera sums its Bayer cells into one grey pixel at bin 2+): brighter, faster focus frames.</summary>
+        public bool MonoBin { get; init; }
+
+        /// <summary>Target name for the FITS OBJECT card and the lights folder; null for calibration frames and snapshots.</summary>
+        public string TargetName { get; init; }
+    }
 
     /// <summary>Result of one exposure, with the statistics the screens show. No pixels yet (engine M3/M5).</summary>
-    public sealed record FrameResult(FrameType Type, double Seconds, int Gain, int Bin, double? SensorTemperature, double Hfr, int Stars, double MeanAduFraction, double? BahtinovOffsetPixels, DateTimeOffset Completed);
+    public sealed record FrameResult(FrameType Type, double Seconds, int Gain, int Bin, double? SensorTemperature, double Hfr, int Stars, double MeanAduFraction, double? BahtinovOffsetPixels, DateTimeOffset Completed) {
+
+        /// <summary>Where the frame was saved; null when it was not saved (snapshots, simulators).</summary>
+        public string FilePath { get; init; }
+    }
 
     public interface ICameraService : IDeviceService {
 
@@ -83,6 +102,13 @@ namespace NINA.Mac.App.Services {
 
         /// <summary>0..1 through the current exposure.</summary>
         double ExposureProgress { get; }
+
+        /// <summary>
+        /// A warning about the camera's health while it is connected, or null. The engine camera sets it when the sensor
+        /// temperature stays frozen while the cooler power climbs (mac/docs/m1-camera-results.md finding 3: after a USB glitch
+        /// the SDK can report a constant temperature); the banner then offers a reconnect.
+        /// </summary>
+        string HealthWarning { get; }
 
         void SetCooler(bool on, double targetCelsius);
 
@@ -183,7 +209,7 @@ namespace NINA.Mac.App.Services {
         public static SessionProgress None { get; } = new(0, 0, null, null, null, TimeSpan.Zero);
     }
 
-    /// <summary>Stand-in for the headless sequencer (M7): expose, dither, stop at limits.</summary>
+    /// <summary>The imaging run: expose, dither, stop at limits (simulated, or NINA's sequencer through the headless engine).</summary>
     public interface ISessionService {
 
         SessionState State { get; }
@@ -192,7 +218,8 @@ namespace NINA.Mac.App.Services {
 
         SessionProgress Progress { get; }
 
-        SessionLayout Layout { get; }
+        /// <summary>Folders of the running (or last) session; null before the first run.</summary>
+        IImageFolders Layout { get; }
 
         IReadOnlyList<string> Log { get; }
 
@@ -227,5 +254,43 @@ namespace NINA.Mac.App.Services {
         Task RunDarksAsync(CalibrationPlan plan, CancellationToken ct = default);
 
         Task RunBiasesAsync(CalibrationPlan plan, CancellationToken ct = default);
+    }
+
+    /// <summary>
+    /// Where a night's frames go. The simulators use <see cref="SessionLayout"/>; the engine uses NINA.Mac.Siril's layout,
+    /// which is what NINA's file patterns write with Real devices.
+    /// </summary>
+    public interface IImageFolders {
+
+        string NightDirectory { get; }
+
+        string FlatsDirectory { get; }
+
+        string DarksDirectory { get; }
+
+        string BiasesDirectory { get; }
+
+        string LightsDirectory(string target);
+
+        /// <summary>Siril command line that would stack a target from this night (shown, not run).</summary>
+        string SirilCommand(string target);
+    }
+
+    public sealed record CentringResult(bool Centred, double? ErrorArcmin, int Solves, string Message);
+
+    /// <summary>Goto plus plate-solve centring (Target screen). The simulators only slew.</summary>
+    public interface ICentringService {
+
+        /// <summary>True when a solver is configured (Real devices); false means "slew only".</summary>
+        bool CanPlateSolve { get; }
+
+        /// <summary>Slews to J2000 coordinates and, when <see cref="CanPlateSolve"/>, centres with solve, sync and re-slew.</summary>
+        Task<CentringResult> SlewAndCentreAsync(double rightAscensionHours, double declinationDegrees, IProgress<string> progress = null, CancellationToken ct = default);
+    }
+
+    /// <summary>A service whose readouts the app refreshes once a second (AppServices.Tick).</summary>
+    public interface IPolledService {
+
+        void Tick();
     }
 }

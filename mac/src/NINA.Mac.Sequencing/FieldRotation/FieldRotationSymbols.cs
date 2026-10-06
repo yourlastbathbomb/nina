@@ -30,8 +30,12 @@ namespace NINA.Mac.Sequencing.FieldRotation {
     /// <item><c>FieldRotation_RateDegPerMin</c>: the signed rate at which the frame turns on the sky, degrees per minute;</item>
     /// <item><c>FieldRotation_MaxSub</c>: the longest exposure, in seconds, that keeps the corner blur within 1 px (decision 4) at
     /// the camera's current binning (capped at <see cref="MaxSubCapSeconds"/>; due east or west the rate is zero and the limit
-    /// infinite). The limit is proportional to the allowed blur, so for B px it is <c>FieldRotation_MaxSub * B</c>; publishing
-    /// the 1 px value keeps a saved expression's meaning independent of the host's settings;</item>
+    /// infinite). The limit is proportional to the allowed blur, so for B px it is <c>FieldRotation_MaxSub * B</c>. This is the
+    /// live value for a display: it follows whatever the camera last did, e.g. Center's solve frames at the plate-solve binning;</item>
+    /// <item><c>FieldRotation_MaxSubBin1</c>: the same limit for 1 unbinned pixel (bin 1), which does not depend on the camera's
+    /// state. The limit is proportional to the binning as well, so for lights at bin b and B binned pixels of blur it is
+    /// <c>FieldRotation_MaxSubBin1 * B * b</c>. Saved expressions (the generator's Stop policy) use this one, so their meaning
+    /// depends neither on the host's settings nor on the binning of the last frame;</item>
     /// <item><c>FieldRotation_Ok</c>: 1 when <see cref="PlannedExposureSeconds"/> is within the limit for
     /// <see cref="PlannedBlurTolerancePx"/> (or no exposure is planned), else 0.</item>
     /// </list>
@@ -44,6 +48,7 @@ namespace NINA.Mac.Sequencing.FieldRotation {
     public sealed class FieldRotationSymbols : ITelescopeConsumer, ICameraConsumer {
         public const string ProviderName = "FieldRotation";
         public const string MaxSubSymbol = ProviderName + "_MaxSub";
+        public const string MaxSubBin1Symbol = ProviderName + "_MaxSubBin1";
         public const string RateSymbol = ProviderName + "_RateDegPerMin";
         public const string OkSymbol = ProviderName + "_Ok";
 
@@ -63,7 +68,7 @@ namespace NINA.Mac.Sequencing.FieldRotation {
             this.telescopeMediator = telescopeMediator;
             this.cameraMediator = cameraMediator;
             provider = symbolBroker.RegisterSymbolProvider(ProviderName);
-            Publish(double.NaN, double.NaN);
+            Publish(double.NaN, double.NaN, double.NaN);
             cameraMediator.RegisterConsumer(this);
             telescopeMediator.RegisterConsumer(this);
         }
@@ -76,6 +81,9 @@ namespace NINA.Mac.Sequencing.FieldRotation {
 
         /// <summary>The last published values (NaN while unknown).</summary>
         public double MaxSubSeconds { get; private set; } = double.NaN;
+
+        /// <summary>The last published <c>FieldRotation_MaxSubBin1</c> (NaN while unknown).</summary>
+        public double MaxSubBin1Seconds { get; private set; } = double.NaN;
 
         public double RateDegPerMin { get; private set; } = double.NaN;
 
@@ -113,7 +121,7 @@ namespace NINA.Mac.Sequencing.FieldRotation {
                 t = telescope;
             }
             if (t == null || !t.Connected || double.IsNaN(t.Altitude) || double.IsNaN(t.Azimuth)) {
-                Publish(double.NaN, double.NaN);
+                Publish(double.NaN, double.NaN, double.NaN);
                 return;
             }
             var latitude = profileService.ActiveProfile.AstrometrySettings.Latitude;
@@ -121,16 +129,19 @@ namespace NINA.Mac.Sequencing.FieldRotation {
             var height = c != null && c.Connected && c.YSize > 0 ? c.YSize : ImagingTrain.Asi585HeightPx;
             var binning = c != null && c.Connected && c.BinX > 0 ? c.BinX : 1;
             var maxSub = MaxSub(latitude, t.Altitude, t.Azimuth, width, height, binning, 1.0);
+            var maxSubBin1 = MaxSub(latitude, t.Altitude, t.Azimuth, width, height, 1, 1.0);
             var rate = RigTools.Rotation.FieldRotation.RateDegPerHour(latitude, t.Altitude, t.Azimuth) / 60.0;
-            Publish(maxSub, rate);
+            Publish(maxSub, maxSubBin1, rate);
         }
 
-        private void Publish(double maxSub, double rate) {
+        private void Publish(double maxSub, double maxSubBin1, double rate) {
             MaxSubSeconds = maxSub;
+            MaxSubBin1Seconds = maxSubBin1;
             RateDegPerMin = rate;
             var planned = PlannedExposureSeconds;
             var ok = double.IsNaN(planned) || (!double.IsNaN(maxSub) && planned <= maxSub * PlannedBlurTolerancePx) ? 1 : 0;
             provider.AddOrUpdateSymbol("MaxSub", maxSub);
+            provider.AddOrUpdateSymbol("MaxSubBin1", maxSubBin1);
             provider.AddOrUpdateSymbol("RateDegPerMin", rate);
             provider.AddOrUpdateSymbol("Ok", ok);
         }

@@ -77,7 +77,7 @@ namespace NINA.Mac.App.Services.Simulation {
             }
         }
 
-        public SessionLayout Layout {
+        public IImageFolders Layout {
             get {
                 lock (lockobj) {
                     return layout;

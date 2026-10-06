@@ -79,7 +79,9 @@ namespace NINA.Mac.App.ViewModels {
             this.services = services;
             StopSession = new TeardownStepViewModel("Stop the imaging session");
             WarmCamera = new TeardownStepViewModel($"Warm the camera ({services.Settings.Current.WarmupRateCelsiusPerMinute:0.#} °C/min), then cooler off");
-            SoftPark = new TeardownStepViewModel("Soft park: low in the south, tracking off");
+            SoftPark = new TeardownStepViewModel(services.DevicesSimulated
+                ? "Soft park: low in the south, tracking off"
+                : "Soft park (the LX200 driver's: tracking off; never the Autostar's park)");
             DisconnectCamera = new TeardownStepViewModel("Disconnect the camera");
             DisconnectMount = new TeardownStepViewModel("Disconnect the mount and focuser");
             ReleaseKeepAwake = new TeardownStepViewModel("Let the Mac sleep again");

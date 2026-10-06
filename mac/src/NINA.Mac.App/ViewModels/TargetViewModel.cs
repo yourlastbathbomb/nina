@@ -18,18 +18,21 @@ using NINA.Mac.App.Astro;
 using NINA.Mac.App.Services;
 using System;
 using System.Collections.ObjectModel;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace NINA.Mac.App.ViewModels {
 
     /// <summary>
     /// Step 4: pick a target, see whether this alt-az site can take it right now (blocked north, zenith keyhole,
-    /// field-rotation sub limit), slew, and hand a plan to Run.
+    /// field-rotation sub limit), slew and centre (plate solving with Real devices), and hand a plan to Run. Stop halts the
+    /// goto (':Q#' on the LX200) and ends the centring.
     /// </summary>
     public sealed partial class TargetViewModel : PageViewModel {
         private readonly AppServices services;
         private readonly INavigator navigator;
         private readonly RunViewModel run;
+        private CancellationTokenSource slewCts;
 
         public TargetViewModel(AppServices services, INavigator navigator, RunViewModel run) : base(PageKind.Target, "Target", "Where to point, and for how long") {
             this.services = services;
@@ -86,6 +89,10 @@ namespace NINA.Mac.App.ViewModels {
 
         [ObservableProperty]
         public partial string SlewStatus { get; set; }
+
+        /// <summary>A slew (and centring) started here is under way; Stop is offered.</summary>
+        [ObservableProperty]
+        public partial bool IsSlewing { get; set; }
 
         [ObservableProperty]
         public partial TargetVisibility Visibility { get; set; }
@@ -147,18 +154,45 @@ namespace NINA.Mac.App.ViewModels {
 
         [RelayCommand]
         private async Task SlewAndCentre() {
-            if (SelectedTarget == null) {
+            if (SelectedTarget == null || IsSlewing) {
                 return;
             }
             ErrorMessage = null;
-            SlewStatus = $"Slewing to {SelectedTarget.Name}…";
+            var target = SelectedTarget;
+            using var cts = new CancellationTokenSource();
+            slewCts = cts;
+            IsSlewing = true;
+            SlewStatus = $"Slewing to {target.Name}…";
             try {
-                await services.Mount.SlewToAsync(SelectedTarget.RightAscensionHours, SelectedTarget.DeclinationDegrees);
-                SlewStatus = $"On {SelectedTarget.Name}. Plate-solve centring arrives with the engine (M6).";
-            } catch (Exception ex) when (ex is InvalidOperationException || ex is DeviceLostException || ex is OperationCanceledException) {
+                var result = await services.Centring.SlewAndCentreAsync(target.RightAscensionHours, target.DeclinationDegrees,
+                    new InlineProgress<string>(s => {
+                        if (!cts.IsCancellationRequested) {
+                            SlewStatus = $"{target.Name}: {s}";
+                        }
+                    }), cts.Token);
+                SlewStatus = $"{target.Name}: {result.Message}";
+            } catch (OperationCanceledException) {
+                // Stop here, the status bar's Stop, or a disconnect halted the mount
+                SlewStatus = $"{target.Name}: stopped; the mount is where the halt left it";
+            } catch (Exception ex) when (ex is InvalidOperationException || ex is DeviceLostException) {
                 SlewStatus = null;
                 ShowError(ex);
+            } finally {
+                slewCts = null;
+                IsSlewing = false;
             }
+        }
+
+        /// <summary>Halts the goto (the mount's Abort: ':Q#') and ends the slew-and-centre started here.</summary>
+        [RelayCommand]
+        private void StopSlew() {
+            SlewStatus = "Stopping…";
+            try {
+                slewCts?.Cancel();
+            } catch (ObjectDisposedException) {
+                // the slew has just ended
+            }
+            services.Mount.Abort();
         }
 
         [RelayCommand]

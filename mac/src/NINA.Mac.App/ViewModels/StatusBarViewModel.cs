@@ -22,7 +22,7 @@ using System.Threading.Tasks;
 
 namespace NINA.Mac.App.ViewModels {
 
-    /// <summary>Bottom bar: device states, sensor temperature/cooler, mount alt/az, battery, keep-awake.</summary>
+    /// <summary>Bottom bar: device states, sensor temperature/cooler, mount alt/az with a Stop while it slews, battery, keep-awake.</summary>
     public sealed partial class StatusBarViewModel : ViewModelBase {
         private readonly AppServices services;
 
@@ -61,6 +61,10 @@ namespace NINA.Mac.App.ViewModels {
         [ObservableProperty]
         public partial string SessionText { get; set; }
 
+        /// <summary>The mount is slewing: the Stop button shows, whichever screen started the goto.</summary>
+        [ObservableProperty]
+        public partial bool IsMountSlewing { get; set; }
+
         public string SimulationNote => services.DevicesSimulated ? "Simulated devices" : null;
 
         public void Refresh() {
@@ -83,6 +87,7 @@ namespace NINA.Mac.App.ViewModels {
         private void RefreshMount() {
             var m = services.Mount;
             Mount.State = m.State;
+            IsMountSlewing = m.State == DeviceConnectionState.Connected && m.IsSlewing;
             Mount.Detail = m.State == DeviceConnectionState.Connected
                 ? $"Alt {Format(m.Altitude, "0.0")}° Az {Format(m.Azimuth, "0.0")}°{(m.IsSlewing ? " · slewing" : m.IsTracking ? "" : " · not tracking")}"
                 : m.State == DeviceConnectionState.Lost ? "lost" : "—";
@@ -118,10 +123,26 @@ namespace NINA.Mac.App.ViewModels {
             };
         }
 
+        /// <summary>
+        /// Halts the mount (':Q#'). A run in progress is stopped too: it is what moves the mount then, and NINA's Center would
+        /// otherwise solve and slew again after the halt.
+        /// </summary>
+        [RelayCommand]
+        private void StopMount() {
+            if (services.Session.State is SessionState.Running or SessionState.Paused) {
+                services.Session.RequestStop("Mount stopped by user");
+            }
+            services.Mount.Abort();
+            RefreshMount();
+        }
+
         internal static string Format(double? value, string format) => value?.ToString(format) ?? "—";
     }
 
-    /// <summary>"Connection lost" banner with a reconnect button. Restores the cooler setpoint after a camera reconnect.</summary>
+    /// <summary>
+    /// "Connection lost" banner with a reconnect button, also shown for a camera health warning (a frozen temperature reading).
+    /// Restores the cooler setpoint after a camera reconnect.
+    /// </summary>
     public sealed partial class ConnectionBannerViewModel : ViewModelBase {
         private readonly AppServices services;
         private bool cameraCoolerWasOn;
@@ -156,6 +177,9 @@ namespace NINA.Mac.App.ViewModels {
             if (services.Mount.State == DeviceConnectionState.Lost) {
                 lost.Add($"Mount: {services.Mount.LastError ?? "connection lost"}. Tracking state unknown; the focuser is unavailable.");
             }
+            if (camera.State == DeviceConnectionState.Connected && camera.HealthWarning is { } warning) {
+                lost.Add($"Camera: {warning}");
+            }
             IsVisible = lost.Count > 0;
             Message = lost.Count == 0 ? null : string.Join("\n", lost);
             if (!IsVisible) {
@@ -170,8 +194,13 @@ namespace NINA.Mac.App.ViewModels {
             // Snapshot first: reconnecting raises Changed with a fresh (cooler off) camera, which would overwrite it
             var restoreCooler = cameraCoolerWasOn;
             var setpoint = cameraSetpoint;
-            foreach (var device in new IDeviceService[] { services.Camera, services.Mount }.Where(d => d.State == DeviceConnectionState.Lost)) {
+            // A camera whose temperature reading froze (USB glitch) is reconnected too: a fresh SDK session reads it again
+            var cameraSuspect = services.Camera.State == DeviceConnectionState.Connected && services.Camera.HealthWarning != null;
+            foreach (var device in new IDeviceService[] { services.Camera, services.Mount }.Where(d => d.State == DeviceConnectionState.Lost || (ReferenceEquals(d, services.Camera) && cameraSuspect))) {
                 try {
+                    if (device.State == DeviceConnectionState.Connected) {
+                        await device.DisconnectAsync();
+                    }
                     await device.ConnectAsync();
                     if (ReferenceEquals(device, services.Camera) && restoreCooler) {
                         services.Camera.SetCooler(true, setpoint);

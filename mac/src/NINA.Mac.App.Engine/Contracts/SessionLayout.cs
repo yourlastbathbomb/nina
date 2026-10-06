@@ -38,7 +38,7 @@ namespace NINA.Mac.App.Services {
     /// </code>
     /// The night is the local date 12 hours earlier, so a session that crosses midnight stays in one folder.
     /// </summary>
-    public sealed class SessionLayout {
+    public sealed class SessionLayout : IImageFolders {
 
         public SessionLayout(string imagesRoot, DateTimeOffset sessionTime, double utcOffsetHours) {
             ArgumentException.ThrowIfNullOrWhiteSpace(imagesRoot);

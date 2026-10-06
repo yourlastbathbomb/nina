@@ -13,6 +13,7 @@
 #endregion "copyright"
 
 using FluentAssertions;
+using NINA.Equipment.Equipment.MyCamera;
 using NINA.Equipment.Equipment.MyTelescope;
 using NINA.Mac.RigTools.Astronomy;
 using NINA.Mac.Sequencer.Test.Sim;
@@ -97,6 +98,33 @@ namespace NINA.Mac.Sequencer.Test {
                 rig.Host.FieldRotation.UpdateDeviceInfo(new TelescopeInfo { Connected = true, Altitude = 45, Azimuth = 0 });
                 rig.Host.SymbolBroker.TryGetValue(FieldRotationSymbols.MaxSubSymbol, out value);
                 ((double)value).Should().BeApproximately(FieldRotationSymbols.MaxSub(Sky.Latitude, 45, 0, 3840, 2160, 1, 1.0), 1e-9, "camera not connected: full sensor at bin 1");
+            } finally {
+                rig.Host.Dispose();
+            }
+        }
+
+        [Test]
+        public void Bin1Symbol_DoesNotFollowTheCamerasBinning_TheLiveSymbolDoes() {
+            // Review M7-1: Center's solve frames switch the camera to the plate-solve binning; the generated Stop predicate must not
+            // change meaning with it
+            var rig = SimRig.CreateUnconnected("field rotation bin1");
+            try {
+                var symbols = rig.Host.FieldRotation;
+                var mount = new TelescopeInfo { Connected = true, Altitude = 62, Azimuth = 140.3 };
+                double Read(string symbol) {
+                    rig.Host.SymbolBroker.TryGetValue(symbol, out var value).Should().BeTrue(symbol);
+                    return (double)value;
+                }
+                var bin1 = FieldRotationSymbols.MaxSub(Sky.Latitude, 62, 140.3, 3840, 2160, 1, 1.0);
+                foreach (short binning in new short[] { 1, 2, 4 }) {
+                    symbols.UpdateDeviceInfo(new CameraInfo { Connected = true, XSize = 3840, YSize = 2160, BinX = binning, BinY = binning });
+                    symbols.UpdateDeviceInfo(mount);
+                    Read(FieldRotationSymbols.MaxSubBin1Symbol).Should().BeApproximately(bin1, 1e-9, $"camera at bin {binning}");
+                    Read(FieldRotationSymbols.MaxSubSymbol).Should().BeApproximately(bin1 * binning, 1e-9, "the live symbol is at the camera's binning");
+                    symbols.MaxSubBin1Seconds.Should().BeApproximately(bin1, 1e-9);
+                }
+                symbols.UpdateDeviceInfo(new TelescopeInfo { Connected = false });
+                double.IsNaN(Read(FieldRotationSymbols.MaxSubBin1Symbol)).Should().BeTrue("unknown while the mount is disconnected");
             } finally {
                 rig.Host.Dispose();
             }

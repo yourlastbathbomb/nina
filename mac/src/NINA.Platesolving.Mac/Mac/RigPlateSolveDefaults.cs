@@ -44,10 +44,42 @@ namespace NINA.PlateSolving.Mac {
         /// <summary>Near-solve search radius in degrees after a handset alignment (research SLV-08: 2-5 deg, not NINA's 30).</summary>
         public const double SearchRadius = 5d;
 
+        /// <summary>Capture-and-solve attempts per centring step (NINA's default is 10).</summary>
+        public const int NumberOfAttempts = 3;
+
+        /// <summary>Wait between failed attempts, minutes (NINA's default is 2).</summary>
+        public const double ReattemptDelayMinutes = 1d;
+
+        /// <summary>
+        /// astrometry-engine's cpulimit for the blind failover, seconds (Homebrew's default is 300). Successful solve-field runs on
+        /// this Mac took 2.6-12 s (full frames, near and blind) and 2-11 s (native-geometry near solves); a failing one runs into the
+        /// solver timeout, cpulimit + 60 s, so 60 s here ends a failing blind solve after about 120 s instead of 360 s.
+        /// </summary>
+        public const int BlindSolveCpuLimitSeconds = 60;
+
+        /// <summary>
+        /// How long a centring step can take before it gives up when every attempt fails and each blind solve-field run ends at
+        /// its timeout: attempts x (solve-frame exposure + blind timeout) + (attempts - 1) x reattempt delay. ASTAP's own run time
+        /// (about a second on this Mac) and the frame download are not included. With <see cref="Apply"/>'s values this is
+        /// 3 x (15 s + 120 s) + 2 x 60 s = 525 s (under 9 minutes); with NINA's defaults (10 attempts, 2 minutes, cpulimit 300)
+        /// it was 10 x (15 s + 360 s) + 9 x 120 s = 4830 s (over 80 minutes). A host can show it next to the centring settings.
+        /// </summary>
+        public static TimeSpan WorstCaseFailingCentringStep(IPlateSolveSettings settings) {
+            ArgumentNullException.ThrowIfNull(settings);
+            var attempts = Math.Max(1, settings.NumberOfAttempts);
+            var perAttempt = TimeSpan.FromSeconds(settings.ExposureTime) +
+                             (settings.BlindFailoverEnabled && settings.BlindSolverType == BlindSolverEnum.LOCAL ? AstrometryNetSetup.SolverTimeout : TimeSpan.Zero);
+            return perAttempt * attempts + TimeSpan.FromMinutes(Math.Max(0, settings.ReattemptDelay)) * (attempts - 1);
+        }
+
         /// <summary>
         /// Applies the rig's plate-solve settings. <paramref name="astapLocation"/> is the value from
         /// <see cref="AstapSetup.Resolve"/>; <paramref name="astrometryBinDirectory"/> the folder with solve-field (Homebrew's
-        /// by default). Every other setting (threshold, attempts, filter, max objects) keeps its value.
+        /// by default). Because the blind failover is the local solve-field, which on this field fails slowly, it also bounds a
+        /// failing centring step (review PS-2): <see cref="NumberOfAttempts"/> attempts, <see cref="ReattemptDelayMinutes"/> between
+        /// them, and astrometry.net's process-wide <see cref="AstrometryNetSetup.CpuLimitSeconds"/> set to
+        /// <see cref="BlindSolveCpuLimitSeconds"/> (see <see cref="WorstCaseFailingCentringStep"/>). Every other setting
+        /// (threshold, filter, max objects, ...) keeps its value.
         /// </summary>
         public static void Apply(IPlateSolveSettings settings, string astapLocation, string astrometryBinDirectory = AstrometryNetSetup.HomebrewBinDirectory) {
             ArgumentNullException.ThrowIfNull(settings);
@@ -61,6 +93,9 @@ namespace NINA.PlateSolving.Mac {
             settings.ExposureTime = ExposureTime;
             settings.Gain = Gain;
             settings.Binning = Binning;
+            settings.NumberOfAttempts = NumberOfAttempts;
+            settings.ReattemptDelay = ReattemptDelayMinutes;
+            AstrometryNetSetup.CpuLimitSeconds = BlindSolveCpuLimitSeconds;
         }
     }
 }

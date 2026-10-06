@@ -29,9 +29,10 @@ namespace NINA.Mac.Sequencing.Planning {
 
         /// <summary>
         /// Image east of the meridian, wait out the keyhole, image west of it (MAC_PORT_PLAN.md section 6): a WaitForAltitude
-        /// below the limit before centring and before every exposure holds the target's loop while it is above the limit, so one
-        /// exposure count covers both sides. An exposure that starts just below the limit is not interrupted; the drift trigger
-        /// (if on) recentres after the wait.
+        /// below the limit before centring, and the fork's KeyholeTrigger before every light frame, which, when the target is above
+        /// the limit, holds the target's loop until it has sunk below it and then centres it again (a slew when
+        /// <see cref="TargetPlan.CenterFirst"/> is off); one exposure count covers both sides. An exposure that starts just below
+        /// the limit is not interrupted. The mount keeps tracking through the keyhole while the loop waits.
         /// </summary>
         WaitUntilBelow
     }
@@ -44,8 +45,10 @@ namespace NINA.Mac.Sequencing.Planning {
 
         /// <summary>
         /// Stop the target's imaging block when rotation outpaces the sub length: a LoopWhile on
-        /// <c>FieldRotation_MaxSub &gt;= exposure</c>, or <c>FieldRotation_MaxSub * B &gt;= exposure</c> for a blur tolerance B other than
-        /// 1 px (the symbols of <see cref="FieldRotation.FieldRotationSymbols"/>, published for 1 px). The target is not resumed later.
+        /// <c>FieldRotation_MaxSubBin1 * B * b &gt;= exposure</c> for a blur tolerance of B binned pixels at the planned binning b
+        /// (<c>FieldRotation_MaxSubBin1 &gt;= exposure</c> when B * b = 1; the symbol of <see cref="FieldRotation.FieldRotationSymbols"/>
+        /// is published for 1 unbinned pixel, so it does not depend on the binning of the camera's last frame). The target is not
+        /// resumed later.
         /// </summary>
         Stop
     }

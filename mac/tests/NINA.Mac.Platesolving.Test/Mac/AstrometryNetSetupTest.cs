@@ -69,6 +69,63 @@ namespace NINA.Mac.Platesolving.Test {
             AstrometryNetSetup.ResolveBinDirectory(exe).Should().Be(Path.Combine(folder, "my bin"));
         }
 
+        private static void Touch(string dir, params string[] names) {
+            Directory.CreateDirectory(dir);
+            foreach (var name in names) {
+                File.WriteAllText(Path.Combine(dir, name), "stand-in");
+            }
+        }
+
+        private static IEnumerable<string> Tiles(int scale, int count, params int[] except) =>
+            Enumerable.Range(0, count).Where(t => !except.Contains(t)).Select(t => $"index-42{scale:00}-{t:00}.fits");
+
+        [Test]
+        public void MissingIndexTiles_AreNamed_ForEveryPartlyInstalledScale() {
+            // Review PS-3: this Mac's folder lacks 7 tiles (4202-05/18/26/37/42, 4203-34, 4204-04); the check must name such gaps
+            var a = Path.Combine(folder, "index a");
+            var b = Path.Combine(folder, "index b");
+            Touch(a, Tiles(2, 48, 5, 18).ToArray());
+            Touch(a, Tiles(5, 12).ToArray());
+            Touch(b, Tiles(3, 48, 34).ToArray());
+            Touch(b, "index-4208.fits", "fetch.log", "index-5200-03.fits");
+            AstrometryNetSetup.IndexDirectories = new[] { a, b };
+
+            AstrometryNetSetup.FindMissingIndexTiles().Should().Equal("index-4202-05.fits", "index-4202-18.fits", "index-4203-34.fits");
+            var message = AstrometryNetSetup.DescribeMissingIndexTiles();
+            message.Should().StartWith("astrometry.net index incomplete: 3 tiles missing (index-4202-05, index-4202-18, index-4203-34)");
+            message.Should().Contain(a).And.Contain(b).And.Contain("data.astrometry.net/4200/");
+
+            // A scale spread over two folders counts as one; a scale not installed at all is not a gap
+            Touch(b, "index-4202-05.fits", "index-4202-18.fits", "index-4203-34.fits");
+            AstrometryNetSetup.FindMissingIndexTiles().Should().BeEmpty();
+            AstrometryNetSetup.DescribeMissingIndexTiles().Should().BeNull();
+            AstrometryNetSetup.TilesPerScale4200(4).Should().Be(48);
+            AstrometryNetSetup.TilesPerScale4200(7).Should().Be(12);
+            AstrometryNetSetup.TilesPerScale4200(8).Should().Be(1);
+        }
+
+        [Test]
+        public void WriteConfig_StillWritesTheConfig_WhenTilesAreMissing() {
+            var dir = Path.Combine(folder, "index gap");
+            Touch(dir, Tiles(4, 48, 4).ToArray());
+            AstrometryNetSetup.IndexDirectories = new[] { dir };
+            AstrometryNetSetup.ConfigDirectory = Path.Combine(folder, "config");
+
+            File.Exists(AstrometryNetSetup.WriteConfig()).Should().BeTrue("a gap is a warning in the log, not a reason to refuse every solve");
+            AstrometryNetSetup.FindMissingIndexTiles().Should().Equal("index-4204-04.fits");
+        }
+
+        [Test]
+        [Explicit("Reads this Mac's astrometry.net index folder (read-only listing)")]
+        [Category("LocalData")]
+        public void ThisMacsIndexFolder_GapsAreReported() {
+            AstrometryNetSetup.IndexDirectories = new[] { SolverKit.AstrometryIndex };
+            var missing = AstrometryNetSetup.FindMissingIndexTiles();
+            TestContext.Out.WriteLine(AstrometryNetSetup.DescribeMissingIndexTiles() ?? "complete");
+            TestContext.Out.WriteLine(string.Join(", ", missing));
+            Assert.Pass($"{missing.Count} missing");
+        }
+
         [Test]
         public void BuildConfig_ListsEveryIndexFolderVerbatim() {
             AstrometryNetSetup.IndexDirectories = new[] { "/Users/me/Library/Application Support/Astrometry", "/Volumes/Data/index 5200" };
