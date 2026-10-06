@@ -119,7 +119,8 @@ namespace NINA.Mac.Equipment.Lx200.Test {
 
         [Test]
         public async Task Goto_BelowTheHorizon_IsRefusedByTheMount_AndReturnsFalse() {
-            using var rig = new Rig();
+            // the mount's own refusal: the driver's slew guard (Lx200SlewGuardTest) would stop this goto before ':MS#'
+            using var rig = new Rig(configure: s => s.SlewGuardEnabled = false);
             var mount = await rig.ConnectTelescope();
             using var notes = Rig.CaptureNotifications();
             var (raNow, _) = rig.Sim.BelievedRaDec;

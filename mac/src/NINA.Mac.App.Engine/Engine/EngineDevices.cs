@@ -75,6 +75,18 @@ namespace NINA.Mac.App.Engine {
 
         public StuckSensorGuardOptions StuckSensor { get; set; }
 
+        /// <summary>
+        /// The site's local horizon (Target › Horizon): the mount's slew guard and, through the rig profile, NINA's horizon
+        /// conditions use it. Null (or a null result) means the mathematical horizon only.
+        /// </summary>
+        public Func<HorizonProfile> Horizon { get; set; }
+
+        /// <summary>
+        /// While a run is active, the camera is marked Lost only when CameraVM has reported it disconnected for this long: NINA's
+        /// ReconnectOnDownloadFailure disconnects and reconnects it between two lights, and that must not raise the banner.
+        /// </summary>
+        public TimeSpan CameraReconnectGrace { get; set; } = TimeSpan.FromSeconds(60);
+
         /// <summary>Temperature readings this soon after a connect are ignored (the SDK reports 0.0 °C before its first poll, M1 finding 2).</summary>
         public TimeSpan FirstReadingDelay { get; set; } = TimeSpan.FromSeconds(3);
     }
@@ -133,6 +145,15 @@ namespace NINA.Mac.App.Engine {
 
         internal string ImagesRoot => Options.ImagesRoot();
 
+        /// <summary>The local horizon for the slew guard (null = none).</summary>
+        internal HorizonProfile Horizon => Options.Horizon?.Invoke();
+
+        /// <summary>Why the horizon did not reach the rig profile, or null.</summary>
+        public string HorizonProblem { get; private set; }
+
+        /// <summary>The engine's copy of the horizon (NINA's AstrometrySettings.HorizonFilePath).</summary>
+        public static string HorizonFilePath => System.IO.Path.Combine(EngineRuntime.DataDirectory ?? CoreUtil.APPLICATIONTEMPPATH, RigProfile.HorizonFileName);
+
         /// <summary>The image folders of the night that includes now (NINA.Mac.Siril's layout, as NINA's file patterns write it).</summary>
         public IImageFolders CurrentFolders() => new SirilFolders(ImagesRoot, Clock.Now);
 
@@ -159,6 +180,7 @@ namespace NINA.Mac.App.Engine {
             try {
                 var settings = options.Settings();
                 e.Solvers = RigProfile.Apply(e.Profile, settings, options.ImagesRoot(), options.HomeDirectory);
+                e.HorizonProblem = RigProfile.ApplyHorizon(e.Profile, e.Horizon, HorizonFilePath, settings.Site.Name);
                 e.appliedFocuserSpeed = Math.Clamp(settings.FocuserSpeed, 1, 4);
                 e.Profile.Save();
 
@@ -208,6 +230,22 @@ namespace NINA.Mac.App.Engine {
             }
         }
 
+        /// <summary>
+        /// Gives the engine a horizon saved on the Target screen (the rig profile's horizon file, used by the sequence's horizon
+        /// waits and conditions). During a run it waits for the run's end, as settings do; returns false then.
+        /// </summary>
+        public bool ApplyHorizon() {
+            lock (settingsLock) {
+                if (Session.IsActive) {
+                    settingsPending = true;
+                    return false;
+                }
+                HorizonProblem = RigProfile.ApplyHorizon(Profile, Horizon, HorizonFilePath, Settings.Site.Name);
+                Profile.Save();
+                return true;
+            }
+        }
+
         /// <summary>Applies settings saved during the run that just ended.</summary>
         internal void ApplyPendingSettings() {
             lock (settingsLock) {
@@ -223,6 +261,7 @@ namespace NINA.Mac.App.Engine {
             var lx = Lx200.Focuser.Settings;
             var speedBefore = lx.FocuserSpeed;
             Solvers = RigProfile.Apply(Profile, settings, ImagesRoot, Options.HomeDirectory);
+            HorizonProblem = RigProfile.ApplyHorizon(Profile, Horizon, HorizonFilePath, settings.Site.Name);
             var defaultSpeed = Math.Clamp(settings.FocuserSpeed, 1, 4);
             if (defaultSpeed == appliedFocuserSpeed) {
                 // RigProfile wrote the unchanged default: keep the speed chosen on the Focus screen

@@ -102,6 +102,14 @@
     <Setter Property="LabelBrush" Value="{DynamicResource TextMutedBrush}" />
   </Style>
 
+  <Style Selector="controls|SkyChart">
+    <Setter Property="Stroke" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="LabelBrush" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="BlockedBrush" Value="{DynamicResource SurfaceRaisedBrush}" />
+    <Setter Property="LimitBrush" Value="{DynamicResource WarnBrush}" />
+    <Setter Property="MountBrush" Value="{DynamicResource OkBrush}" />
+  </Style>
+
   <Style Selector="ProgressBar">
     <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
     <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}" />

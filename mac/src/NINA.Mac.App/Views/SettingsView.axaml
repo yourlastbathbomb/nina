@@ -55,6 +55,8 @@
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Recentre on drift (′, 0 = off)" /><NumericUpDown Value="{Binding Draft.Solver.RecenterArcmin}" Minimum="0" Maximum="30" Increment="0.5" FormatString="0.0" /></StackPanel>
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Centre before a run" /><CheckBox IsChecked="{Binding Draft.CentreBeforeRun}" /></StackPanel>
             <TextBlock Text="{Binding SolverProblem}" Classes="warn" TextWrapping="Wrap" IsVisible="{Binding SolverProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Name="IndexTilesWarning" Text="{Binding IndexTilesWarning}" Classes="warn small" TextWrapping="Wrap" IsVisible="{Binding IndexTilesWarning, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Name="CentringWorstCase" Text="{Binding CentringWorstCaseText}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding CentringWorstCaseText, Converter={x:Static ObjectConverters.IsNotNull}}" />
           </StackPanel>
         </Border>
       </Grid>
@@ -79,6 +81,8 @@
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Pixel size (µm)" /><NumericUpDown Value="{Binding Draft.Optics.PixelSizeMicrons}" Minimum="0.5" Maximum="20" Increment="0.1" FormatString="0.00" /></StackPanel>
             <StackPanel Classes="row"><TextBlock Classes="label" Text="Binning" /><NumericUpDown Value="{Binding Draft.Optics.Bin}" Minimum="1" Maximum="4" Increment="1" FormatString="0" /></StackPanel>
             <TextBlock Text="{Binding PixelScaleText}" Classes="muted small" Margin="0,6,0,0" TextWrapping="Wrap" />
+            <TextBlock Name="SolverFieldWarning" Text="{Binding SolverFieldWarning}" Classes="warn small" TextWrapping="Wrap" IsVisible="{Binding SolverFieldWarning, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Text="The train in use can also be switched on the Connect screen. Scale and field update on Save." Classes="muted small" TextWrapping="Wrap" />
           </StackPanel>
         </Border>
       </Grid>

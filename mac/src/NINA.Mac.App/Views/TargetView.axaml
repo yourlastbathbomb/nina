@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:NINA.Mac.App.ViewModels"
              xmlns:astro="using:NINA.Mac.App.Astro"
+             xmlns:controls="using:NINA.Mac.App.Controls"
              x:Class="NINA.Mac.App.Views.TargetView"
              x:DataType="vm:TargetViewModel">
 
@@ -70,6 +71,54 @@
               <Button Name="UseForRunButton" Classes="accent" Content="Use for Run" Command="{Binding UseForRunCommand}" />
             </StackPanel>
             <TextBlock Text="{Binding SlewStatus}" Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <!-- Sky view: horizon, keyhole, minimum altitude, the target's path to dawn, the mount -->
+        <Border Classes="card">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Sky from the site" Classes="h2" />
+            <controls:SkyChart Name="SkyChart" Height="230" Horizon="{Binding ChartHorizon}" MaxAltitude="{Binding ChartMaxAltitude}" MinAltitude="{Binding ChartMinAltitude}"
+                               Track="{Binding Track}" Target="{Binding TargetPoint}" Mount="{Binding MountPoint}" />
+            <TextBlock Text="Filled: below the local horizon. Dashed box: the zenith keyhole. Line: the target's path until dawn (dot: now). Cross: the mount. Image east or west of the meridian, not at transit." Classes="muted small" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <!-- Horizon editor -->
+        <Border Classes="card">
+          <StackPanel Spacing="8" DataContext="{Binding Horizon}" x:DataType="vm:HorizonEditorViewModel">
+            <TextBlock Text="Horizon" Classes="h2" />
+            <TextBlock Name="HorizonSource" Text="{Binding SourceText}" Classes="muted small" TextWrapping="Wrap" />
+            <TextBlock Text="Point the scope at the top of the skyline (handset arrows), then Record point from mount; every ~15° of azimuth is enough. Save gives it to the slew guard and to NINA's horizon conditions." Classes="muted small" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="140,140,*">
+              <TextBlock Text="Azimuth (°)" Classes="muted small" />
+              <TextBlock Grid.Column="1" Text="Altitude (°)" Classes="muted small" />
+            </Grid>
+            <ItemsControl Name="HorizonRows" ItemsSource="{Binding Rows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:HorizonRowViewModel">
+                  <Grid ColumnDefinitions="140,140,*" Margin="0,2">
+                    <NumericUpDown Value="{Binding Azimuth}" Minimum="0" Maximum="360" Increment="5" FormatString="0.#" Width="130" HorizontalAlignment="Left" />
+                    <NumericUpDown Grid.Column="1" Value="{Binding Altitude}" Minimum="0" Maximum="90" Increment="1" FormatString="0.#" Width="130" HorizontalAlignment="Left" />
+                    <Button Grid.Column="2" Content="Remove" HorizontalAlignment="Left"
+                            Command="{Binding $parent[ItemsControl].((vm:HorizonEditorViewModel)DataContext).RemoveRowCommand}" CommandParameter="{Binding}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <CheckBox Name="HorizonEstimate" IsChecked="{Binding IsEstimate}" Content="Estimate, not measured (preflight warns)" />
+            <WrapPanel Orientation="Horizontal">
+              <Button Name="RecordHorizonPoint" Content="Record point from mount" Command="{Binding RecordFromMountCommand}" IsEnabled="{Binding CanRecord}" Margin="0,0,8,6" />
+              <Button Name="AddHorizonRow" Content="Add point" Command="{Binding AddRowCommand}" Margin="0,0,8,6" />
+              <Button Name="SaveHorizon" Classes="accent" Content="Save" Command="{Binding SaveCommand}" Margin="0,0,8,6" />
+              <Button Content="Revert" Command="{Binding RevertCommand}" Margin="0,0,8,6" />
+              <Button Content="Import .hrz…" Command="{Binding ImportCommand}" Margin="0,0,8,6" />
+              <Button Content="Export .hrz…" Command="{Binding ExportCommand}" Margin="0,0,8,6" />
+              <Button Content="Built-in estimate" Command="{Binding UseEstimateCommand}" Margin="0,0,8,6" />
+            </WrapPanel>
+            <TextBlock Name="HorizonError" Text="{Binding Error}" Classes="error" TextWrapping="Wrap" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Name="HorizonStatus" Text="{Binding Status}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding Status, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <TextBlock Classes="muted small" TextWrapping="Wrap"><Run Text="File: " /><Run Text="{Binding FilePath}" /></TextBlock>
           </StackPanel>
         </Border>
       </StackPanel>

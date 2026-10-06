@@ -27,8 +27,10 @@ using NINA.Equipment.Interfaces;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Equipment.Interfaces.ViewModel;
 using NINA.Equipment.Mac;
+using NINA.Image.Mac;
 using NINA.Mac.Sequencing.Catalogue;
 using NINA.Mac.Sequencing.FieldRotation;
+using NINA.Mac.Sequencing.Horizon;
 using NINA.Mac.Sequencing.Planning;
 using NINA.PlateSolving;
 using NINA.PlateSolving.Interfaces;
@@ -68,6 +70,12 @@ namespace NINA.Mac.Sequencing.Headless {
 
         /// <summary>Solvers for Center, SolveAndSync and drift centring. Default: NINA's PlateSolverFactoryProxy (the profile's solvers).</summary>
         public IPlateSolverFactory PlateSolverFactory { get; init; }
+
+        /// <summary>
+        /// The app's version for the SWCREATE header of saved frames ("Nightglass &lt;version&gt; (based on N.I.N.A. ...) (arm64)",
+        /// NINA.Image.Mac's MacImageFileIdentity). Default: the entry assembly's version when it is the app, else "dev".
+        /// </summary>
+        public string SoftwareVersion { get; init; }
     }
 
     /// <summary>
@@ -97,6 +105,13 @@ namespace NINA.Mac.Sequencing.Headless {
             if (System.Windows.Application.Current == null) {
                 _ = new System.Windows.Application();
             }
+
+            // Saved frames name this program and the real architecture in SWCREATE, not "N.I.N.A. ... (x64)"
+            MacImageFileIdentity.Apply(options.SoftwareVersion);
+
+            // The profile's horizon through the mac reader (inline '# comments', every unreadable line reported), before anything
+            // reads it: upstream's reader, which ran when the profile was loaded, drops lines with inline comments
+            Horizon = new ProfileHorizonWatcher(ProfileService);
 
             // Status and application handlers first: device view models report status as soon as they exist
             ApplicationStatus = new HeadlessApplicationStatus();
@@ -173,6 +188,12 @@ namespace NINA.Mac.Sequencing.Headless {
         }
 
         public IProfileService ProfileService { get; }
+
+        /// <summary>
+        /// Keeps <c>AstrometrySettings.Horizon</c> loaded with <see cref="HorizonFile"/> (reloads on a new path or HorizonChanged).
+        /// <see cref="ProfileHorizonWatcher.Last"/> lists the lines it could not read, for the app to show.
+        /// </summary>
+        public ProfileHorizonWatcher Horizon { get; }
 
         public CameraMediator CameraMediator { get; } = new CameraMediator();
         public TelescopeMediator TelescopeMediator { get; } = new TelescopeMediator();
@@ -266,6 +287,7 @@ namespace NINA.Mac.Sequencing.Headless {
                 return;
             }
             disposed = true;
+            Horizon.Dispose();
             FieldRotation.Dispose();
             SymbolBroker.Dispose();
             imaging.Dispose();

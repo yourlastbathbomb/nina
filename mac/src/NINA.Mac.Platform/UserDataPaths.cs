@@ -79,6 +79,9 @@ namespace NINA.Mac.Platform {
 
         public string SettingsFile => Path.Combine(SettingsDirectory, "settings.json");
 
+        /// <summary>The site's local horizon in NINA's .hrz format (Target › Horizon writes it).</summary>
+        public string HorizonFile => Path.Combine(SettingsDirectory, "horizon.hrz");
+
         /// <summary>
         /// The headless engine's data folder (NINA's CoreUtil.APPLICATIONTEMPPATH with Real devices): NINA's logs, the rig
         /// profile, the plate solvers' working files and the catalogue database, kept apart from the app's own settings.

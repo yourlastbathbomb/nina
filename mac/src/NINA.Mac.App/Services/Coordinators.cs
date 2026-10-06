@@ -94,6 +94,9 @@ namespace NINA.Mac.App.Services {
 
         public PowerSourceInfo Current { get; private set; } = PowerSourceInfo.Unavailable;
 
+        /// <summary>The source it polls (preflight reads it once more).</summary>
+        public IPowerSource Source => source;
+
         public string LastError { get; private set; }
 
         public event EventHandler Changed;

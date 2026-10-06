@@ -101,6 +101,11 @@ namespace NINA.Mac.App.ViewModels {
         [ObservableProperty]
         public partial string BahtinovText { get; set; }
 
+        /// <summary>Where the Bahtinov number comes from, and that its direction is not yet confirmed on the sky.</summary>
+        public string BahtinovNote => services.DevicesSimulated
+            ? "simulated"
+            : "measured on the frame; the in/out hint is not yet checked on the sky: confirm by eye on the mask's spikes";
+
         [ObservableProperty]
         public partial string PositionNote { get; set; }
 

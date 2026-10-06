@@ -21,7 +21,7 @@
           <StackPanel Grid.Column="1">
             <TextBlock Text="Bahtinov offset" Classes="muted" />
             <TextBlock Name="Bahtinov" Text="{Binding BahtinovText, TargetNullValue='—'}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
-            <TextBlock Text="simulated until M5" Classes="muted small" />
+            <TextBlock Text="{Binding BahtinovNote}" Classes="muted small" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel Grid.Column="2">
             <TextBlock Text="Stars" Classes="muted" />

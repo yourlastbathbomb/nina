@@ -180,7 +180,7 @@ namespace NINA.Mac.App.Test.Ui {
             vm.Run.ErrorMessage.Should().BeNull();
             vm.Run.StateText.Should().Be("Finished");
             vm.Run.FramesText.Should().Be("4 / 4");
-            vm.Run.OutputFolder.Should().Be("/Users/test/Astro/Nightglass/2026-10-10/lights/NGC_253");
+            vm.Run.OutputFolder.Should().Be("/Users/test/Astro/Nightglass/2026-10-10/NGC 253/lights");
             vm.Run.Log.Should().Contain(l => l.Contains("Session end: All frames taken"));
             vm.StatusBar.SessionText.Should().Be("Finished 4/4");
             services.Mount.Altitude.Should().BeGreaterThan(20);
@@ -213,7 +213,7 @@ namespace NINA.Mac.App.Test.Ui {
             clock.Advance(TimeSpan.FromMinutes(10));
             await vm.Calibrate.RunDarksCommand.ExecuteAsync(null);
             vm.Calibrate.Status.Should().Be("Done: 4 darks (10, 20 s)");
-            vm.Calibrate.DarksFolder.Should().EndWith("/2026-10-10/darks");
+            vm.Calibrate.DarksFolder.Should().EndWith("/library/darks", "the dark library is shared by every night (NINA.Mac.Siril)");
         }
 
         [TestCase("10, 20, 30", new[] { 10.0, 20, 30 })]

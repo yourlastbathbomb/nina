@@ -102,3 +102,23 @@ NOVAS also needs the JPL DE421 ephemeris: put the `JPLEPH` file from nina.extern
 | "M42" search | A database built from the upstream SQL in a temp folder finds NGC1976 "M 42" at 05h35m17.3s -05°23'28". The default database is `~/Library/Application Support/NINA/NINA.sqlite` |
 | Upstream tests | 1781 of the 1787 linked upstream cases pass, and all 67 mac tests (1848 of 1854). Five fail because upstream's expected values need an `asin` result 1 ulp below the correctly rounded one that macOS returns (Windows' C runtime, evidently), one because macOS has a shorter list of invalid file-name characters. The result does not change with the time zone or culture. Details in `src/README-engine.md` |
 | Image (non-rendering), Equipment, PlateSolving, headless capture into the Siril folder layout | Not started. `CoreUtil` now splits patterns on `\` and `/` and writes Windows-portable file names (see `src/README-engine.md`) |
+
+## Nightglass, the app (M8)
+
+`src/NINA.Mac.App` is the Avalonia app, Nightglass. `src/NINA.Mac.App.Engine` connects it to NINA's engine (Settings › Devices: Simulated or Real). The night's procedure, with the cable plan, handset alignment, screens, focus, targets, teardown, stacking and troubleshooting, is in **[docs/first-light-runbook.md](docs/first-light-runbook.md)**.
+
+```bash
+mac/packaging/package-app.sh                                   # mac/artifacts/Nightglass.app: --smoke-test (preflight included) and --gui-smoke
+mac/artifacts/Nightglass.app/Contents/MacOS/Nightglass --preflight          # daytime check: PASS/WARN/FAIL with a fix per line; exit 1 on FAIL
+mac/artifacts/Nightglass.app/Contents/MacOS/Nightglass --preflight --with-devices   # also asks the ZWO SDK whether a camera is on USB
+mac/artifacts/Nightglass.app/Contents/MacOS/Nightglass --stack-night [YYYY-MM-DD] [--dry-run]   # after the night: Siril stacks every target
+```
+
+Build and test the app projects one test project at a time (`src/NINA.Mac.App/README.md`):
+
+```bash
+mac/dotnet build mac/src/NINA.Mac.App/NINA.Mac.App.csproj
+mac/dotnet test mac/tests/NINA.Mac.App.Test/NINA.Mac.App.Test.csproj --blame-hang-timeout 5m
+mac/dotnet test mac/tests/NINA.Mac.App.Engine.Test/NINA.Mac.App.Engine.Test.csproj --blame-hang-timeout 5m
+```
+

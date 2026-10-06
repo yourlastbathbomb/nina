@@ -61,7 +61,7 @@ namespace NINA.Mac.App.ViewModels {
         [ObservableProperty]
         public partial string SessionText { get; set; }
 
-        /// <summary>The mount is slewing: the Stop button shows, whichever screen started the goto.</summary>
+        /// <summary>The mount is slewing, or a goto/park/centring command is in flight: the Stop button shows, whichever screen started it.</summary>
         [ObservableProperty]
         public partial bool IsMountSlewing { get; set; }
 
@@ -87,7 +87,8 @@ namespace NINA.Mac.App.ViewModels {
         private void RefreshMount() {
             var m = services.Mount;
             Mount.State = m.State;
-            IsMountSlewing = m.State == DeviceConnectionState.Connected && m.IsSlewing;
+            // From the command as well as the 1 s poll: a short goto can start and end between two polls
+            IsMountSlewing = m.State == DeviceConnectionState.Connected && (m.IsSlewing || m.IsMotionCommandActive);
             Mount.Detail = m.State == DeviceConnectionState.Connected
                 ? $"Alt {Format(m.Altitude, "0.0")}° Az {Format(m.Azimuth, "0.0")}°{(m.IsSlewing ? " · slewing" : m.IsTracking ? "" : " · not tracking")}"
                 : m.State == DeviceConnectionState.Lost ? "lost" : "—";

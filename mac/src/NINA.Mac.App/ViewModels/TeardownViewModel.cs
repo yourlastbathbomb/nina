@@ -92,6 +92,11 @@ namespace NINA.Mac.App.ViewModels {
 
         public ObservableCollection<TeardownStepViewModel> Steps { get; }
 
+        /// <summary>What soft park does with the devices in use (the simulators park low in the south; the LX200 driver parks in place until bench step 8 sets a position).</summary>
+        public string SoftParkNote => services.DevicesSimulated
+            ? "Soft park never sends the mount to Dec +89° (the blocked north); the simulator points low in the south and stops tracking."
+            : "Soft park never sends ':hP#' or the Autostar's park (Dec +89°, the blocked north): the LX200 driver stops tracking where the scope points. Then switch the mount off at its power switch.";
+
         public TeardownStepViewModel StopSession { get; }
 
         public TeardownStepViewModel WarmCamera { get; }
@@ -113,6 +118,10 @@ namespace NINA.Mac.App.ViewModels {
         [ObservableProperty]
         public partial string SirilCommand { get; set; }
 
+        /// <summary>The one command that stacks the whole night after teardown (NINA.Mac.Siril's night processor through the app).</summary>
+        [ObservableProperty]
+        public partial string StackNightCommand { get; set; }
+
         [ObservableProperty]
         public partial string KeepAwakeText { get; set; }
 
@@ -122,6 +131,7 @@ namespace NINA.Mac.App.ViewModels {
             SirilCommand = services.Session.Plan is { } plan
                 ? layout.SirilCommand(plan.TargetName)
                 : $"siril-cli -d \"{System.IO.Path.Combine(layout.NightDirectory, "siril", "<target>")}\" -s OSC_Preprocessing.ssf";
+            StackNightCommand = $"\"{Environment.ProcessPath ?? services.Info.ShortName}\" {Diagnostics.StackNight.Flag} {System.IO.Path.GetFileName(layout.NightDirectory)}";
             KeepAwakeText = services.KeepAwake.State.Summary;
         }
 

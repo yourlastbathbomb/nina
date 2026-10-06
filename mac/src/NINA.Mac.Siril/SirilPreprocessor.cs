@@ -45,8 +45,9 @@ namespace NINA.Mac.Siril {
 
         /// <param name="validate">Run <see cref="SirilSessionValidator"/> first and stop on errors.</param>
         /// <param name="cleanProcessDirectory">Delete the target's process/ (Siril intermediates only) before running.</param>
+        /// <param name="onLine">Receives siril-cli's log lines as they are printed (see <see cref="SirilRunner.RunAsync"/>).</param>
         public static async Task<SirilPreprocessingResult> RunAsync(SirilPreprocessingPlan plan, SirilRunner runner, bool validate = true,
-                bool cleanProcessDirectory = true, CancellationToken token = default) {
+                bool cleanProcessDirectory = true, CancellationToken token = default, Action<string> onLine = null) {
             var result = new SirilPreprocessingResult();
             if (validate) {
                 result.Issues = SirilSessionValidator.Validate(plan);
@@ -60,13 +61,14 @@ namespace NINA.Mac.Siril {
             }
             result.ScriptPath = result.Script.Save();
             var started = DateTime.UtcNow.AddSeconds(-2);
-            result.Run = await runner.RunAsync(result.ScriptPath, result.Script.WorkingDirectory, null, token).ConfigureAwait(false);
+            result.Run = await runner.RunAsync(result.ScriptPath, result.Script.WorkingDirectory, null, token, onLine).ConfigureAwait(false);
             result.Results = Directory.EnumerateFiles(result.Script.WorkingDirectory, "result_*.fit")
                 .Where(f => File.GetLastWriteTimeUtc(f) >= started)
                 .OrderBy(f => f, StringComparer.Ordinal)
                 .ToList();
-            if (!result.Run.Succeeded && plan.Dark == DarkSource.Library && plan.MasterDarkPathTemplate != null) {
-                var library = Path.GetFullPath(Path.GetDirectoryName(plan.MasterDarkPathTemplate));
+            var darkReference = plan.MasterDarkPath ?? plan.MasterDarkPathTemplate;
+            if (!result.Run.Succeeded && plan.Dark == DarkSource.Library && darkReference != null) {
+                var library = Path.GetFullPath(Path.GetDirectoryName(darkReference));
                 result.MissingMasterDark = result.Run.MissingFiles.FirstOrDefault(f => string.Equals(Path.GetDirectoryName(Path.GetFullPath(f)), library, StringComparison.Ordinal));
             }
             return result;

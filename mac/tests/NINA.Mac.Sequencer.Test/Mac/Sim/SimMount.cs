@@ -275,7 +275,16 @@ namespace NINA.Mac.Sequencer.Test.Sim {
 
         public PierSide DestinationSideOfPier(Coordinates coordinates) => PierSide.pierUnknown;
 
-        /// <summary>Angular distance between where the mount points and <paramref name="target"/>, arcminutes.</summary>
-        public double TrueErrorArcmin(Coordinates target) => (True - target.Transform(Epoch.J2000)).Distance.ArcMinutes;
+        /// <summary>
+        /// Angular distance between where the mount points and <paramref name="target"/>, arcminutes. Haversine: NINA's
+        /// acos-based Coordinates subtraction returns NaN for numerically identical coordinates (wave-7 note).
+        /// </summary>
+        public double TrueErrorArcmin(Coordinates target) {
+            var a = True;
+            var b = target.Transform(Epoch.J2000);
+            double ra1 = a.RA * 15 * Math.PI / 180, dec1 = a.Dec * Math.PI / 180, ra2 = b.RA * 15 * Math.PI / 180, dec2 = b.Dec * Math.PI / 180;
+            var h = Math.Pow(Math.Sin((dec2 - dec1) / 2), 2) + (Math.Cos(dec1) * Math.Cos(dec2) * Math.Pow(Math.Sin((ra2 - ra1) / 2), 2));
+            return 2 * Math.Asin(Math.Min(1, Math.Sqrt(h))) * 180 / Math.PI * 60;
+        }
     }
 }

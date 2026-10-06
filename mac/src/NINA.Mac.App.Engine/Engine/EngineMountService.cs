@@ -50,6 +50,7 @@ namespace NINA.Mac.App.Engine {
         private bool focuserConnected;
         private string focuserError;
         private CancellationTokenSource haltCts = new();
+        private int motionCommands;
 
         internal EngineMountService(EngineDevices engine, Func<IReadOnlyList<SerialPortInfo>> portLister) {
             this.engine = engine;
@@ -124,6 +125,32 @@ namespace NINA.Mac.App.Engine {
         public bool IsSlewing => WithInfo(i => (bool?)i.Slewing) ?? false;
 
         public bool IsTracking => WithInfo(i => (bool?)i.TrackingEnabled) ?? false;
+
+        /// <summary>A goto, park or slew-and-centre through this service is in flight (counted from the call, not from the 1 s poll).</summary>
+        public bool IsMotionCommandActive => Volatile.Read(ref motionCommands) > 0;
+
+        /// <summary>Marks a motion command in flight until the returned scope is disposed (gotos, parks, slew-and-centre).</summary>
+        internal IDisposable BeginMotion() {
+            Interlocked.Increment(ref motionCommands);
+            RaiseChanged();
+            return new MotionScope(this);
+        }
+
+        private sealed class MotionScope : IDisposable {
+            private EngineMountService owner;
+
+            public MotionScope(EngineMountService owner) {
+                this.owner = owner;
+            }
+
+            public void Dispose() {
+                var o = Interlocked.Exchange(ref owner, null);
+                if (o != null) {
+                    Interlocked.Decrement(ref o.motionCommands);
+                    o.RaiseChanged();
+                }
+            }
+        }
 
         public void RefreshPorts() {
             IReadOnlyList<SerialPortInfo> list;
@@ -256,14 +283,9 @@ namespace NINA.Mac.App.Engine {
         public async Task SlewToAsync(double rightAscensionHours, double declinationDegrees, CancellationToken ct = default) {
             EnsureConnected();
             var target = new Coordinates(Angle.ByHours(rightAscensionHours), Angle.ByDegree(declinationDegrees), Epoch.J2000);
-            var (alt, _) = AltAz(target);
-            var limits = engine.Settings;
-            if (alt < 0) {
-                throw new InvalidOperationException($"Slew refused: target is below the horizon (altitude {alt:0.0}°)");
-            }
-            if (alt > limits.MaxAltitudeDegrees) {
-                throw new InvalidOperationException($"Slew refused: altitude {alt:0.0}° is above the {limits.MaxAltitudeDegrees:0}° keyhole limit");
-            }
+            var (alt, az) = AltAz(target);
+            SlewGuard.Check(alt, az, engine.Settings, engine.Horizon);
+            using var motion = BeginMotion();
             var since = DateTime.UtcNow;
             // NINA's TelescopeVM reports a goto that ':Q#' halted as a success; a halt (Abort, Disconnect) cancels this token instead
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, HaltToken);
@@ -316,6 +338,7 @@ namespace NINA.Mac.App.Engine {
         /// <summary>The driver's soft park (Lx200Settings: park in place, or at the stored alt/az; tracking off). Never :hP#.</summary>
         public async Task SoftParkAsync(CancellationToken ct = default) {
             EnsureConnected();
+            using var motion = BeginMotion();
             var since = DateTime.UtcNow;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, HaltToken);
             var ok = await engine.Host.TelescopeMediator.ParkTelescope(null, linked.Token);

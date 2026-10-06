@@ -10,7 +10,9 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
 | `DarkLibrary` | Scans the raw-dark sets and builds masters with siril-cli. Siril names each master from the token template |
 | `SirilScriptGenerator` | Generates a per-target script equivalent to `OSC_Preprocessing` v1.4, or `OSC_Extract_HaOIII` v1.5 on dual-band nights |
 | `SirilSessionValidator` | Runs the checks Siril skips: one exposure/gain/offset/set-point/binning per lights folder, BAYERPAT present, sizes match, the master exists, no stray JPEG/TIFF files |
-| `SirilRunner` | Runs `siril-cli -o -i <own ini> -d <dir> -s <script>`, captures the log, detects failure and parses `Error in line N` and missing files |
+| `SirilRunner` | Runs `siril-cli -o -i <own ini> -d <dir> -s <script>`, captures the log (and streams each line to an optional callback), detects failure and parses `Error in line N` and missing files |
+| `MasterDarkIndex` | Reads the masters' headers and finds the master for a night's lights: exposure, gain, offset, binning, size, camera (INSTRUME) and temperature within a tolerance; says in plain words why none matches and which darks to shoot |
+| `SirilNightProcessor` | "Stack last night": every target of one night, its matching master (explicit path), flats and dark flats/biases if present, the generated script, the run with the log streamed, and a report naming each stack |
 | `SirilPreprocessor` | Validate, then generate, then clean `process/`, then run, then collect `result_*.fit` |
 
 ## Layout (defaults)
@@ -47,13 +49,28 @@ This is the Siril output side of the macOS port. It covers `MAC_PORT_PLAN.md` se
   - `RegistrationReference.TwoPass` with `Framing.Min/Max/Cog`.
   - `DarkSource.Folder`: the stock darks/ step.
   - `ProcessingMode.HaOIII`.
-- **siril-cli config.** siril-cli writes `wd=` and every `set` into the ini it loaded. The runner therefore copies the GUI config (`~/Library/Application Support/org.siril.Siril/siril/config.1.4.ini`, read only) to `~/Library/Application Support/NINA-mac/siril/siril-cli.ini` before each run and passes that copy with `-i`.
+- **siril-cli config.** siril-cli writes `wd=` and every `set` into the ini it loaded. The runner therefore copies the GUI config (`~/Library/Application Support/org.siril.Siril/siril/config.1.4.ini`, read only) to `~/Library/Application Support/Nightglass/siril/siril-cli.ini` (the app's own folder) before each run and passes that copy with `-i`. The working directory (`-d`) is the target's folder (or the library), never Siril's GUI working directory.
 - **Pinned output format.** Every generated script (preprocessing and master darks) starts with `setext fit`, `set32bits` and `setcompress 0`. The runner seeds its ini from the GUI config, so without these lines the GUI preferences would decide the output format:
   - `extension`: master names would no longer be `.fit`.
   - `force_16bit=true`, which is set in William's GUI config: masters, `pp_` frames and the OIII result would be saved as 16-bit integers, with negative calibrated values clipped to 0. Only `stack -32b` overrides this preference.
   - `[compression] enabled=true`: masters and results would be written as `.fit.fz`, which the `-dark=` template, the validator and the result collection do not look for.
 
   These `set` commands land only in the runner's own ini.
+
+## Dark library index and stacking a night
+
+- **Matching (`MasterDarkIndex.Find`).** Siril's own lookup (the `-dark=` header-token template) matches exposure, gain, offset, set point and binning exactly after `%d` truncation, reads only the first light, and stops the script with only a file name in the log. The index reads every master's header (values missing from it come from a default-template file name, with a note) and matches:
+  - exposure within 0.05 s, gain, offset and binning exactly, the frame size, and the camera (INSTRUME; a master without it is accepted with a warning, `RequireSameCamera` can relax it);
+  - temperature within 2 °C (`TemperatureToleranceC`), compared on the sensor temperature (median CCD-TEMP of the lights; the master's CCD-TEMP) where known, else the set point. A cooler that never reached its set point (no 12 V supply) is therefore matched by what the sensor really was, and is reported. A master whose temperature is unknown (no CCD-TEMP or SET-TEMP in its header and a name that does not follow the default template) is refused for lights of known temperature, with a reason that says how to make it usable; only lights of unknown temperature are matched without comparing temperatures, with a warning.
+  - The best candidate is the closest in temperature, then the one stacked from more frames. `NeedsExplicitPath` says when Siril's template would not have found it (e.g. a T-1 master for T0 lights).
+  - With no match the message names the lights' settings, the nearest masters and why each was not taken, and the darks to shoot and where they go, e.g. "No master dark matches lights at 20 s, gain 252, offset 50, bin 2, sensor 24.3 °C (set point 0.0 °C), …. Nearest: dark_20s_G252_O50_T0_B2.fit (taken at 0.0 °C, the lights at 24.3 °C (tolerance 2 °C)). Shoot 30-50 darks of 20 s at gain 252, offset 50, bin 2, within 2 °C of 24.3 °C (they go to …/library/darks), then build the masters."
+- **Explicit master.** `SirilPreprocessingPlan.MasterDarkPath` replaces the template with the chosen master's absolute path; the validator then checks that file and its size.
+- **A night (`SirilNightProcessor`).** `Prepare(layout, night)` decides without running anything; `RunAsync(layout, night, runner, options, log)` first builds missing or stale masters from the library's raw dark sets, then per target (folders of the night with FITS lights; fewer than 3 lights are skipped):
+  - the matching master, or with none (default `ProcessWithoutDark`) no dark and a note that says why, or the target is skipped;
+  - the target's or the night's flats if present, calibrated with its or the night's dark flats/biases, else with the synthetic offset if `SyntheticOffsetMultiplier` is set, else uncalibrated with a warning; no flats is said too;
+  - OSC script: lights as taken (bin 2), calibrate, debayer, register on the middle frame (`setref`, the mid-session orientation for alt-az field rotation), stack, `result_<LIVETIME>s.fit` in the target folder;
+  - siril-cli with the app's ini; each log line goes to `log` as `[<target>] <line>`, the decisions as `Siril: …`; a failed target does not stop the others.
+  - `SirilNightReport.Lines` is the report: per target the stack path or the failure (with the log path and a missing master dark), and the notes.
 
 ## Siril 1.4.4 behaviour verified here (siril-cli on this Mac)
 
@@ -93,6 +110,8 @@ mac/dotnet test  mac/tests/NINA.Mac.Siril.Test/NINA.Mac.Siril.Test.csproj
   - Aborts on exposure and gain mismatch.
   - Equivalence with the stock script.
   - A run seeded with GUI-style preferences (`.fits`, `force_16bit=true`, compression on), written by the test. All outputs must still be `.fit` at BITPIX -32. A control run with the pins removed shows that these preferences do take effect.
+- **`MasterDarkIndexTest`** (no Siril): exact match equals Siril's template; a T-1 master within tolerance for T0 lights (explicit path needed); a cooler at 24.3 °C for a 0 °C set point finds nothing and says what to shoot; another camera or size is refused; the closer temperature, then more frames, wins; file-name fallback; a master of unknown temperature refused for warm and for cold lights; lights of unknown temperature still matched with a warning; empty library; `Prepare` for a night of three targets (dark + flats + dark flats; no dark and no flats; too few lights).
+- **`SirilNightTest`** (siril-cli): a synthetic night, two targets and raw library darks without a master. `RunAsync` builds the master, stacks NGC 253 (8 lights, explicit master, flats with dark flats, `setref pp_light 4`) and M 42 (6 lights at a 24 °C sensor: no dark, said so) into one 640x480 RGB `result_*.fit` each, and streams Siril's log per target.
 - **`SyntheticOffsetTest`.** It runs the generated flat step with N = 17 in siril-cli, and pins Siril's rejection of a fractional N.
 
 ## Use from the engine
@@ -104,6 +123,10 @@ var runner = new SirilRunner();                                       // own ini
 await layout.Library.BuildMastersAsync(runner);                       // missing/stale masters
 var plan = SirilPreprocessingPlan.ForTarget(layout.GetTargetFolders(night, "NGC 253"), layout.Library);
 var result = await SirilPreprocessor.RunAsync(plan, runner);          // result.Issues, result.Run.Summary, result.Results
+
+// or a whole night: masters built if missing, matching dark per target, log streamed
+var night = await SirilNightProcessor.RunAsync(layout, new DateOnly(2026, 10, 3), runner, log: line => Console.WriteLine(line));
+foreach (var line in night.Lines) { Console.WriteLine(line); }            // stacks, missing darks, missing flats
 ```
 
 ## Status

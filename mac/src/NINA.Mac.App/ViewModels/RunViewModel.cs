@@ -18,6 +18,7 @@ using NINA.Mac.App.Astro;
 using NINA.Mac.App.Services;
 using System;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Threading.Tasks;
 
 namespace NINA.Mac.App.ViewModels {
@@ -25,15 +26,34 @@ namespace NINA.Mac.App.ViewModels {
     /// <summary>Step 5: run the plan from the Target screen; show progress, limits and where frames go.</summary>
     public sealed partial class RunViewModel : PageViewModel {
         private readonly AppServices services;
+        private readonly Action cancelCalibration;
+        private bool cancelCalibrationArmed;
 
-        public RunViewModel(AppServices services) : base(PageKind.Run, "Run", "Expose, dither, stop at the limits") {
+        /// <summary>How long Start waits for a cancelled calibration to let the camera go.</summary>
+        public static readonly TimeSpan CalibrationStopWait = TimeSpan.FromSeconds(45);
+
+        /// <param name="cancelCalibration">Cancels the Calibrate screen's run (flats, darks, biases); null = cannot.</param>
+        public RunViewModel(AppServices services, Action cancelCalibration = null) : base(PageKind.Run, "Run", "Expose, dither, stop at the limits") {
             this.services = services;
+            this.cancelCalibration = cancelCalibration;
             services.Session.Changed += (_, _) => Refresh();
             services.Camera.Changed += (_, _) => ExposureProgress = services.Camera.ExposureProgress;
             Refresh();
         }
 
         public ObservableCollection<string> Log { get; } = new();
+
+        /// <summary>What the plan check found for the loaded plan (Real devices: NINA.Mac.Sequencing's PlanValidator).</summary>
+        public ObservableCollection<string> PlanWarnings { get; } = new();
+
+        public ObservableCollection<string> PlanErrors { get; } = new();
+
+        [ObservableProperty]
+        public partial string PlanCheckSummary { get; set; }
+
+        /// <summary>Set when Start found a calibration running: a second Start cancels it and starts the run.</summary>
+        [ObservableProperty]
+        public partial string CalibrationConflict { get; set; }
 
         [ObservableProperty]
         public partial SessionPlan Plan { get; set; }
@@ -80,7 +100,26 @@ namespace NINA.Mac.App.ViewModels {
 
         public void LoadPlan(SessionPlan plan) {
             Plan = plan;
+            CheckPlan();
             Refresh();
+        }
+
+        /// <summary>Runs the plan check for the loaded plan and lists what it found.</summary>
+        public void CheckPlan() {
+            PlanWarnings.Clear();
+            PlanErrors.Clear();
+            PlanCheckSummary = null;
+            if (Plan == null) {
+                return;
+            }
+            var check = services.Session.CheckPlan(Plan) ?? PlanCheck.Empty;
+            foreach (var w in check.Warnings) {
+                PlanWarnings.Add(w);
+            }
+            foreach (var e in check.Errors) {
+                PlanErrors.Add(e);
+            }
+            PlanCheckSummary = check.Summary;
         }
 
         partial void OnPlanChanged(SessionPlan value) {
@@ -134,6 +173,29 @@ namespace NINA.Mac.App.ViewModels {
                 return;
             }
             ErrorMessage = null;
+            if (services.Calibration.IsRunning) {
+                if (!cancelCalibrationArmed || cancelCalibration == null) {
+                    cancelCalibrationArmed = cancelCalibration != null;
+                    CalibrationConflict = cancelCalibration != null
+                        ? $"Calibration is running ({services.Calibration.Status}). Press Start again to cancel it and start the run, or wait until it finishes."
+                        : $"Calibration is running ({services.Calibration.Status}). Cancel it on the Calibrate screen first.";
+                    return;
+                }
+                cancelCalibrationArmed = false;
+                CalibrationConflict = "Cancelling the calibration…";
+                cancelCalibration();
+                var waited = Stopwatch.StartNew();
+                while (services.Calibration.IsRunning && waited.Elapsed < CalibrationStopWait) {
+                    await Task.Delay(100);
+                }
+                if (services.Calibration.IsRunning) {
+                    CalibrationConflict = null;
+                    ErrorMessage = "The calibration did not stop; cancel it on the Calibrate screen, then start again.";
+                    return;
+                }
+            }
+            cancelCalibrationArmed = false;
+            CalibrationConflict = null;
             try {
                 await services.Session.RunAsync(Plan);
             } catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException) {

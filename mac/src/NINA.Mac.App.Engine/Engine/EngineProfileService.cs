@@ -21,8 +21,10 @@ using NINA.PlateSolving.Mac;
 using NINA.Profile;
 using NINA.Profile.Interfaces;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 
 namespace NINA.Mac.App.Engine {
 
@@ -141,8 +143,23 @@ namespace NINA.Mac.App.Engine {
             LocationChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        /// <summary>
+        /// As upstream's ProfileService: sets the path and loads the horizon from it, here with the engine's reader
+        /// (NINA.Mac.Sequencing's HorizonFile: inline comments allowed, NINA's CustomHorizon built from the points); cleared when
+        /// empty or unreadable. HorizonChanged then lets HeadlessHost's ProfileHorizonWatcher reload it the same way.
+        /// </summary>
         public void ChangeHorizon(string horizonFilePath) {
-            ActiveProfile.AstrometrySettings.HorizonFilePath = horizonFilePath;
+            var a = ActiveProfile.AstrometrySettings;
+            a.HorizonFilePath = horizonFilePath ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(horizonFilePath)) {
+                a.Horizon = null;
+            } else {
+                var loaded = NINA.Mac.Sequencing.Horizon.HorizonFile.Load(horizonFilePath);
+                if (!loaded.Succeeded) {
+                    Logger.Error($"Nightglass engine: {loaded.Summary}; the sequence uses no custom horizon");
+                }
+                a.Horizon = loaded.Horizon;
+            }
             HorizonChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -188,6 +205,44 @@ namespace NINA.Mac.App.Engine {
 
         /// <summary>Default dither distance in (unbinned) pixels; DitherAsync overrides it per call.</summary>
         public const double DitherPixels = 5;
+
+        /// <summary>The engine's copy of the app's horizon, in NINA's plain format (see <see cref="ApplyHorizon"/>).</summary>
+        public const string HorizonFileName = "horizon.hrz";
+
+        /// <summary>
+        /// Gives the sequencer the app's horizon: writes it in NINA's plain format (no inline comments, points at 0° and 360°)
+        /// to <paramref name="horizonFilePath"/> and points the profile at it, which loads NINA's CustomHorizon for
+        /// WaitUntilAboveHorizon, AboveHorizonCondition and the plan validator. A null horizon clears the profile's.
+        /// Returns the problem, or null.
+        /// </summary>
+        public static string ApplyHorizon(IProfileService profileService, HorizonProfile horizon, string horizonFilePath, string siteName = null) {
+            ArgumentNullException.ThrowIfNull(profileService);
+            if (horizon == null || string.IsNullOrWhiteSpace(horizonFilePath)) {
+                profileService.ChangeHorizon(string.Empty);
+                return null;
+            }
+            try {
+                // Written with the engine's writer (plain format upstream reads the same), with explicit 0° and 360° points so the
+                // grooming of a missing end never changes the shape across north
+                var points = horizon.Points.Select(p => (p.Azimuth, p.Altitude)).ToList();
+                if (!points.Any(p => p.Azimuth == 0)) {
+                    points.Add((0, horizon.GetAltitude(0)));
+                }
+                if (!points.Any(p => p.Azimuth == 360)) {
+                    points.Add((360, horizon.GetAltitude(0)));
+                }
+                var comments = new List<string> { $"Nightglass local horizon{(string.IsNullOrWhiteSpace(siteName) ? "" : " for " + siteName)}, from {horizon.Source ?? "the app"}; rewritten at every start and save" };
+                if (horizon.IsEstimate) {
+                    comments.Add($"{HorizonProfile.EstimateMarker}: ESTIMATE ONLY, not measured");
+                }
+                NINA.Mac.Sequencing.Horizon.HorizonFile.Save(horizonFilePath, points, comments);
+            } catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException) {
+                profileService.ChangeHorizon(string.Empty);
+                return $"Could not write the engine's horizon file {horizonFilePath}: {ex.Message}";
+            }
+            profileService.ChangeHorizon(horizonFilePath);
+            return profileService.ActiveProfile.AstrometrySettings.Horizon == null ? $"NINA could not read the horizon file {horizonFilePath}" : null;
+        }
 
         public static SolverSetup Apply(IProfileService profileService, AppSettings settings, string imagesRoot, string home = null) {
             ArgumentNullException.ThrowIfNull(profileService);
@@ -240,6 +295,8 @@ namespace NINA.Mac.App.Engine {
 
             var lx = new Lx200Settings(profileService);
             lx.FocuserSpeed = Math.Clamp(settings.FocuserSpeed, 1, 4);
+            // The driver's own slew guard uses the same keyhole limit as the app's (Settings › Limits), not its 75° default
+            lx.MaxAltitudeDegrees = settings.MaxAltitudeDegrees;
 
             var solver = settings.Solver ?? new SolverSettings();
             var astapExecutable = ExpandHome(solver.AstapExecutable, home);

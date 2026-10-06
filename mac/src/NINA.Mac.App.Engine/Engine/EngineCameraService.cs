@@ -63,12 +63,31 @@ namespace NINA.Mac.App.Engine {
         private DateTimeOffset? engineExposureStart;
         private double engineExposureSeconds;
         private string healthWarning;
+        private DateTimeOffset? disconnectedSince;
+        private bool lostByPoll;
 
         internal EngineCameraService(EngineDevices engine, StuckSensorGuardOptions guardOptions, TimeSpan firstReadingDelay) {
             this.engine = engine;
             guard = new StuckSensorGuard(guardOptions);
             this.firstReadingDelay = firstReadingDelay;
             targetTemperature = engine.Settings.CoolingTargetCelsius;
+            reconnectGrace = engine.Options.CameraReconnectGrace;
+        }
+
+        private readonly TimeSpan reconnectGrace;
+
+        /// <summary>
+        /// Set while a run is active and CameraVM reports the camera disconnected, before the grace window ends (NINA's
+        /// ReconnectOnDownloadFailure is probably reconnecting it); null otherwise.
+        /// </summary>
+        public string ReconnectNote {
+            get {
+                lock (lockobj) {
+                    return state == DeviceConnectionState.Connected && disconnectedSince != null
+                        ? "The camera dropped out; NINA is reconnecting it before the next frame"
+                        : null;
+                }
+            }
         }
 
         public string DisplayName => "Camera";
@@ -200,6 +219,8 @@ namespace NINA.Mac.App.Engine {
                 lock (lockobj) {
                     info = ToInfo(nina);
                     connectedAt = engine.Clock.Now;
+                    disconnectedSince = null;
+                    lostByPoll = false;
                     coolerOn = nina.CoolerOn;
                     if (!double.IsNaN(nina.TemperatureSetPoint) && nina.CoolerOn) {
                         targetTemperature = nina.TemperatureSetPoint;
@@ -246,6 +267,8 @@ namespace NINA.Mac.App.Engine {
                 engineExposureStart = null;
                 guard.Reset();
                 healthWarning = null;
+                disconnectedSince = null;
+                lostByPoll = false;
             }
             SetState(DeviceConnectionState.Disconnected, null);
         }
@@ -346,7 +369,9 @@ namespace NINA.Mac.App.Engine {
         /// ZWO mono-bin is off on the camera and in the profile, so the run's lights keep their Bayer pattern.
         /// </summary>
         internal async Task PrepareForRunAsync(TimeSpan timeout, CancellationToken ct) {
-            var deadline = DateTime.UtcNow + timeout;
+            // A long calibration dark is waited for: its remaining time plus a download margin, at least the given timeout
+            var left = OwnExposureRemaining ?? TimeSpan.Zero;
+            var deadline = DateTime.UtcNow + (left + DownloadMargin > timeout ? left + DownloadMargin : timeout);
             while (true) {
                 lock (lockobj) {
                     if (!ownExposure) {
@@ -354,7 +379,7 @@ namespace NINA.Mac.App.Engine {
                     }
                 }
                 if (DateTime.UtcNow > deadline) {
-                    throw new InvalidOperationException("The camera is still busy with a focus or calibration frame");
+                    throw new InvalidOperationException("The camera is still busy with a focus or calibration frame. Stop it (Focus or Calibrate screen) and start the run again.");
                 }
                 await Task.Delay(50, ct);
             }
@@ -362,6 +387,22 @@ namespace NINA.Mac.App.Engine {
                 MonoBinOff(engine.Host.Camera.GetDevice());
             } else {
                 ClearMonoBinInProfile();
+            }
+        }
+
+        /// <summary>How long a frame may take to download and save after its exposure ends (USB 3, bin 2: well under a second normally).</summary>
+        internal static readonly TimeSpan DownloadMargin = TimeSpan.FromSeconds(30);
+
+        /// <summary>Time left in a frame this service is taking (focus, snapshot, calibration); null when none is going.</summary>
+        internal TimeSpan? OwnExposureRemaining {
+            get {
+                lock (lockobj) {
+                    if (!ownExposure) {
+                        return null;
+                    }
+                    var left = exposureSeconds - (engine.Clock.Now - exposureStart).TotalSeconds;
+                    return TimeSpan.FromSeconds(Math.Max(0, left));
+                }
             }
         }
 
@@ -378,16 +419,40 @@ namespace NINA.Mac.App.Engine {
             }
         }
 
-        /// <summary>The app's 1 Hz tick: picks up CameraVM's latest poll, runs the stuck-sensor guard, follows the sequencer's exposures.</summary>
+        /// <summary>
+        /// The app's 1 Hz tick: picks up CameraVM's latest poll, runs the stuck-sensor guard, follows the sequencer's exposures.
+        /// A camera CameraVM reports disconnected during a run is given <see cref="EngineDevicesOptions.CameraReconnectGrace"/>
+        /// before it is marked Lost, because NINA's ReconnectOnDownloadFailure disconnects and reconnects it between lights; a
+        /// camera that comes back after that (a slow reconnect) returns to Connected by itself.
+        /// </summary>
         public void Tick() {
             var lost = false;
+            var recovered = false;
             lock (lockobj) {
-                if (state == DeviceConnectionState.Connected) {
+                if (state == DeviceConnectionState.Lost && lostByPoll && engine.CameraGate.IsOpen) {
+                    var nina = engine.Host.Camera.CameraInfo;
+                    if (nina.Connected) {
+                        ResumeAfterEngineReconnectLocked(nina);
+                        state = DeviceConnectionState.Connected;
+                        lastError = null;
+                        recovered = true;
+                    }
+                } else if (state == DeviceConnectionState.Connected) {
                     var nina = engine.Host.Camera.CameraInfo;
                     var now = engine.Clock.Now;
                     if (!nina.Connected) {
-                        lost = true;
+                        if (engine.Session.IsActive) {
+                            disconnectedSince ??= now;
+                            lost = now - disconnectedSince.Value >= reconnectGrace;
+                        } else {
+                            lost = true;
+                        }
                     } else {
+                        if (disconnectedSince != null) {
+                            // NINA reconnected it (ReconnectOnDownloadFailure): a fresh SDK session, so the first-reading guard applies again
+                            ResumeAfterEngineReconnectLocked(nina);
+                            recovered = true;
+                        }
                         if (now - coolerCommandedAt > CommandSettle) {
                             coolerOn = nina.CoolerOn;
                             if (nina.CoolerOn && !double.IsNaN(nina.TemperatureSetPoint)) {
@@ -407,23 +472,38 @@ namespace NINA.Mac.App.Engine {
                     }
                 }
             }
+            if (recovered) {
+                Logger.Info("Nightglass: the camera is connected again (reconnected by NINA)");
+            }
             if (lost) {
-                MarkLost("The camera stopped answering (USB unplugged, or the 12 V supply off?). Reconnect it.");
+                MarkLost("The camera stopped answering (USB unplugged, or the 12 V supply off?). Reconnect it.", byPoll: true);
                 return;
             }
             RaiseChanged();
         }
 
+        private void ResumeAfterEngineReconnectLocked(NinaCameraInfo nina) {
+            disconnectedSince = null;
+            lostByPoll = false;
+            connectedAt = engine.Clock.Now;
+            info = ToInfo(nina);
+            engineExposureStart = null;
+            guard.Reset();
+            healthWarning = null;
+        }
+
         public void Dispose() {
         }
 
-        internal void MarkLost(string reason) {
+        internal void MarkLost(string reason, bool byPoll = false) {
             lock (lockobj) {
                 if (state != DeviceConnectionState.Connected) {
                     return;
                 }
                 state = DeviceConnectionState.Lost;
                 lastError = reason;
+                lostByPoll = byPoll;
+                disconnectedSince = null;
                 coolerOn = false;
                 ownExposure = false;
                 engineExposureStart = null;

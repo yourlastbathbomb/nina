@@ -78,6 +78,40 @@ namespace NINA.Mac.App.ViewModels {
 
         public string SolverProblem => services.Engine?.Solvers?.Problem;
 
+        /// <summary>astrometry.net 4200-series tiles missing from a partly installed scale (solve-field cannot solve there); null when complete.</summary>
+        public string IndexTilesWarning {
+            get {
+                try {
+                    return NINA.PlateSolving.Mac.AstrometryNetSetup.DescribeMissingIndexTiles();
+                } catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) {
+                    return $"astrometry.net index folder could not be read: {ex.Message}";
+                }
+            }
+        }
+
+        /// <summary>How long a centring that keeps failing takes before it gives up (Real devices: the rig profile's plate-solve settings).</summary>
+        public string CentringWorstCaseText {
+            get {
+                var ps = services.Engine?.Profile?.ActiveProfile?.PlateSolveSettings;
+                if (ps == null) {
+                    return null;
+                }
+                var worst = NINA.PlateSolving.Mac.RigPlateSolveDefaults.WorstCaseFailingCentringStep(ps);
+                return $"A centring that keeps failing gives up after at most {worst.TotalMinutes:0.#} min ({ps.NumberOfAttempts} attempts of a {ps.ExposureTime:0} s frame, ASTAP, then solve-field, {ps.ReattemptDelay:0.#} min apart); the run then images where the goto put it.";
+            }
+        }
+
+        /// <summary>Plan risk 4: the selected train's field is below ASTAP D80's minimum.</summary>
+        public string SolverFieldWarning {
+            get {
+                var o = Draft.Optics;
+                var height = o.SensorHeight * (206.264806 * o.PixelSizeMicrons / o.EffectiveFocalLengthMm) / 3600.0;
+                return height < NINA.Mac.App.Diagnostics.Preflight.AstapD80MinimumFieldDegrees
+                    ? $"Field height {height:0.000}° is below ASTAP D80's 0.15° minimum: solves may fail at this focal length. Fit the f/6.3 reducer for the first night (plan risk 4)."
+                    : null;
+            }
+        }
+
         public string PixelScaleText => $"{Draft.Optics.PixelScaleArcsec:0.000}″/px at bin {Draft.Optics.Bin}, field {FieldText()}";
 
         partial void OnImagesRootTextChanged(string value) {
@@ -90,7 +124,19 @@ namespace NINA.Mac.App.ViewModels {
         }
 
         public override void Refresh() {
+            // The optical train (Connect screen) and night vision (menu, toolbar) are also saved elsewhere: take them into the
+            // working copy, so a later Save here does not put the old values back
+            var current = services.Settings.Current;
+            if (Draft.Optics.UseReducer != current.Optics.UseReducer || Draft.NightVision != current.NightVision) {
+                var draft = Draft.Clone();
+                draft.Optics.UseReducer = current.Optics.UseReducer;
+                draft.NightVision = current.NightVision;
+                Draft = draft;
+            }
             OnPropertyChanged(nameof(PixelScaleText));
+            OnPropertyChanged(nameof(SolverFieldWarning));
+            OnPropertyChanged(nameof(IndexTilesWarning));
+            OnPropertyChanged(nameof(CentringWorstCaseText));
         }
 
         [RelayCommand]
@@ -133,6 +179,8 @@ namespace NINA.Mac.App.ViewModels {
             Draft = settings.Clone();
             ImagesRootText = settings.ImagesRoot ?? "";
             OnPropertyChanged(nameof(PixelScaleText));
+            OnPropertyChanged(nameof(SolverFieldWarning));
+            OnPropertyChanged(nameof(CentringWorstCaseText));
         }
 
         private string FieldText() {

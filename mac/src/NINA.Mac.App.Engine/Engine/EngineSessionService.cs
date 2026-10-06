@@ -170,6 +170,45 @@ namespace NINA.Mac.App.Engine {
             };
         }
 
+        /// <summary>
+        /// NINA.Mac.Sequencing's PlanValidator over the plan as it would run now: the target's window between dusk and the dawn
+        /// stop, with the profile's horizon, the keyhole and the field-rotation limit; warnings such as "Holds the sequence until
+        /// dawn" and "Never reached" come through unchanged.
+        /// </summary>
+        public PlanCheck CheckPlan(SessionPlan p) {
+            ArgumentNullException.ThrowIfNull(p);
+            try {
+                var night = ToNightPlan(p);
+                var report = engine.Host.Validator.Validate(night);
+                var warnings = report.Issues.Where(i => i.Severity == PlanIssueSeverity.Warning).Select(i => i.Message).ToList();
+                var errors = report.Issues.Where(i => i.Severity == PlanIssueSeverity.Error).Select(i => i.Message).ToList();
+                var w = report.Windows.FirstOrDefault();
+                string summary;
+                if (w?.ExpectedStart is DateTime from && w.ExpectedEnd is DateTime to) {
+                    summary = $"Tonight (dark {report.Dusk:HH:mm}-{report.Dawn:HH:mm}): expected to image {from:HH:mm}-{to:HH:mm}, ending at {Describe(w.ExpectedStop)}; peak altitude {w.PeakAltitudeDeg:0}° at {w.PeakTime:HH:mm}";
+                } else if (w?.Start is DateTime start && w.End is DateTime end) {
+                    summary = $"Tonight (dark {report.Dusk:HH:mm}-{report.Dawn:HH:mm}): observable {start:HH:mm}-{end:HH:mm}";
+                } else {
+                    summary = $"Tonight (dark {report.Dusk:HH:mm}-{report.Dawn:HH:mm}): not observable under the limits and the horizon";
+                }
+                return new PlanCheck(warnings, errors, summary);
+            } catch (Exception ex) {
+                // A check must never stop the operator from seeing the Run screen; the run itself validates again
+                Logger.Error("Nightglass: plan check failed", ex);
+                return new PlanCheck(Array.Empty<string>(), new[] { $"The plan check failed: {ex.Message}" }, null);
+            }
+        }
+
+        private static string Describe(ExpectedStop stop) => stop switch {
+            ExpectedStop.Count => "the frame count",
+            ExpectedStop.Horizon => "the horizon",
+            ExpectedStop.MinimumAltitude => "the minimum altitude",
+            ExpectedStop.Keyhole => "the keyhole (maximum altitude)",
+            ExpectedStop.FieldRotation => "the field-rotation limit",
+            ExpectedStop.Dawn => "dawn",
+            _ => "not imaged",
+        };
+
         public async Task RunAsync(SessionPlan newPlan, CancellationToken ct = default) {
             ArgumentNullException.ThrowIfNull(newPlan);
             if (newPlan.FrameCount < 1 || newPlan.ExposureSeconds <= 0) {
@@ -246,7 +285,10 @@ namespace NINA.Mac.App.Engine {
                     return;
                 }
                 Append($"Sequence: {gates} light loop(s), frames to {Layout.LightsDirectory(targetName)}");
-                // A focus frame still going ends first; the lights must not inherit its ZWO mono-bin
+                // A focus or calibration frame still going ends first; the lights must not inherit its ZWO mono-bin
+                if (engine.Camera.OwnExposureRemaining is { } busy) {
+                    Append($"Waiting for the camera's current frame to finish ({busy.TotalSeconds:0} s left)");
+                }
                 await engine.Camera.PrepareForRunAsync(CameraReleaseWait, cts.Token);
                 await runner.RunAsync(new Progress<ApplicationStatus>(), cts.Token);
                 // NINA's ImageSaveController writes each light after its sequence item returns: let the last ones land

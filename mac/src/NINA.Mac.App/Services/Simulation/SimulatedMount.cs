@@ -34,6 +34,7 @@ namespace NINA.Mac.App.Services.Simulation {
         private readonly IClock clock;
         private readonly Func<AppSettings> settings;
         private readonly Func<IReadOnlyList<SerialPortInfo>> portLister;
+        private readonly Func<HorizonProfile> horizon;
         private readonly Random random = new(1209);
         private readonly object lockobj = new();
         private DeviceConnectionState state = DeviceConnectionState.Disconnected;
@@ -48,10 +49,12 @@ namespace NINA.Mac.App.Services.Simulation {
         private double fixedAz;
         private CancellationTokenSource slewCts;
 
-        public SimulatedMount(IClock clock, Func<AppSettings> settings, Func<IReadOnlyList<SerialPortInfo>> portLister = null) {
+        /// <param name="horizon">The local horizon for the slew guard; null (or a null result) means the mathematical horizon only.</param>
+        public SimulatedMount(IClock clock, Func<AppSettings> settings, Func<IReadOnlyList<SerialPortInfo>> portLister = null, Func<HorizonProfile> horizon = null) {
             this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
             this.settings = settings ?? throw new ArgumentNullException(nameof(settings));
             this.portLister = portLister ?? (() => SerialPorts.List());
+            this.horizon = horizon ?? (() => null);
         }
 
         public TimeSpan ConnectDelay { get; set; } = TimeSpan.FromSeconds(2);
@@ -117,6 +120,9 @@ namespace NINA.Mac.App.Services.Simulation {
                 }
             }
         }
+
+        /// <summary>The simulator sets <see cref="IsSlewing"/> before a goto's first await, so the command and the readout agree.</summary>
+        public bool IsMotionCommandActive => IsSlewing;
 
         private GeoSite Site => new(settings().Site.LatitudeDegrees, settings().Site.LongitudeDegrees);
 
@@ -187,13 +193,7 @@ namespace NINA.Mac.App.Services.Simulation {
 
         public async Task SlewToAsync(double rightAscensionHours, double declinationDegrees, CancellationToken ct = default) {
             var (alt, az) = SkyMath.ToAltAz(clock.Now, rightAscensionHours, declinationDegrees, Site);
-            var limits = settings();
-            if (alt < 0) {
-                throw new InvalidOperationException($"Slew refused: target is below the horizon (altitude {alt:0.0}°)");
-            }
-            if (alt > limits.MaxAltitudeDegrees) {
-                throw new InvalidOperationException($"Slew refused: altitude {alt:0.0}° is above the {limits.MaxAltitudeDegrees:0}° keyhole limit");
-            }
+            SlewGuard.Check(alt, az, settings(), horizon());
             await MoveAsync(alt, az, ct, () => {
                 ra = rightAscensionHours;
                 dec = declinationDegrees;

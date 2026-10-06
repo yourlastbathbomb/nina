@@ -47,7 +47,8 @@ namespace NINA.Mac.App.Engine.Test {
         private volatile bool synced;
 
         public EngineRig(string name, Action<AppSettings> configure = null, IClock clock = null, StuckSensorGuardOptions stuckSensor = null,
-                TimeSpan? firstReadingDelay = null, double pointingErrorRaArcmin = 12, double pointingErrorDecArcmin = -7, DateTime? dawn = null) {
+                TimeSpan? firstReadingDelay = null, double pointingErrorRaArcmin = 12, double pointingErrorDecArcmin = -7, DateTime? dawn = null,
+                Action<EngineDevicesOptions> configureOptions = null) {
             Folder = TestHost.NewFolder(name);
             ImagesRoot = Path.Combine(Folder, "images");
             Settings = new AppSettings {
@@ -80,7 +81,7 @@ namespace NINA.Mac.App.Engine.Test {
             Solver = new FakeSolver(Truth);
             Ports = new List<SerialPortInfo> { new("/dev/cu.Bluetooth-Incoming-Port", false), new(Port, true) };
 
-            Engine = EngineDevices.Create(new EngineDevicesOptions {
+            var options = new EngineDevicesOptions {
                 Settings = () => Settings,
                 // As the app: the images root follows the settings (Settings › Storage)
                 ImagesRoot = () => Settings.ImagesRoot ?? ImagesRoot,
@@ -97,7 +98,9 @@ namespace NINA.Mac.App.Engine.Test {
                 SerialPortLister = () => Ports,
                 StuckSensor = stuckSensor,
                 FirstReadingDelay = firstReadingDelay ?? TimeSpan.Zero,
-            });
+            };
+            configureOptions?.Invoke(options);
+            Engine = EngineDevices.Create(options);
 
             // Faster than the rig's defaults, as the driver and sequencer tests run them
             var lx = Engine.Lx200.Telescope.Settings;

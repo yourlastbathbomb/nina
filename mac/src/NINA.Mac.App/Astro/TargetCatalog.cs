@@ -88,12 +88,18 @@ namespace NINA.Mac.App.Astro {
         bool TransitsAboveMaxAltitude,
         IReadOnlyList<string> Warnings) {
 
-        public bool Observable => !NeverRises && !InBlockedNorth && !AboveMaxAltitude && !BelowMinAltitude;
+        /// <summary>Below the site's local horizon (Target › Horizon) at its azimuth now.</summary>
+        public bool BelowLocalHorizon { get; init; }
+
+        /// <summary>The local horizon's altitude at the target's azimuth now; NaN without a horizon.</summary>
+        public double LocalHorizonAltitude { get; init; } = double.NaN;
+
+        public bool Observable => !NeverRises && !InBlockedNorth && !AboveMaxAltitude && !BelowMinAltitude && !BelowLocalHorizon;
     }
 
     public static class TargetPlanner {
 
-        public static TargetVisibility Evaluate(CatalogTarget target, DateTimeOffset now, AppSettings settings, double exposureSeconds) {
+        public static TargetVisibility Evaluate(CatalogTarget target, DateTimeOffset now, AppSettings settings, double exposureSeconds, HorizonProfile horizon = null) {
             var site = new GeoSite(settings.Site.LatitudeDegrees, settings.Site.LongitudeDegrees);
             var (alt, az) = SkyMath.ToAltAz(now, target.RightAscensionHours, target.DeclinationDegrees, site);
             var ha = SkyMath.HourAngleHours(SkyMath.LocalSiderealTimeHours(now, site.LongitudeDegrees), target.RightAscensionHours);
@@ -106,6 +112,8 @@ namespace NINA.Mac.App.Astro {
             var aboveMax = alt > settings.MaxAltitudeDegrees;
             var belowMin = alt < settings.MinAltitudeDegrees;
             var transitsHigh = transitAlt > settings.MaxAltitudeDegrees;
+            var localHorizon = horizon?.GetAltitude(az) ?? double.NaN;
+            var belowLocal = horizon != null && alt > 0 && alt < localHorizon;
 
             var warnings = new List<string>();
             if (neverRises) {
@@ -119,6 +127,9 @@ namespace NINA.Mac.App.Astro {
                 } else if (transitsHigh) {
                     warnings.Add($"Transits at {transitAlt:0.0}°, above the {settings.MaxAltitudeDegrees:0}° limit: image well east or west of the meridian.");
                 }
+                if (belowLocal && !blocked) {
+                    warnings.Add($"Behind the local horizon: altitude {alt:0.0}° at azimuth {az:0}°, where the horizon is {localHorizon:0}°{(horizon.IsEstimate ? " (estimated)" : "")}.");
+                }
                 if (belowMin && !blocked) {
                     warnings.Add($"Altitude {alt:0.0}° is below the {settings.MinAltitudeDegrees:0}° minimum.");
                 }
@@ -127,7 +138,10 @@ namespace NINA.Mac.App.Astro {
                 }
             }
             return new TargetVisibility(alt, az, ha, transitAlt, now + SkyMath.TimeToTransit(now, target.RightAscensionHours, site.LongitudeDegrees),
-                maxSub, neverRises, blocked, aboveMax, belowMin, transitsHigh, warnings);
+                maxSub, neverRises, blocked, aboveMax, belowMin, transitsHigh, warnings) {
+                BelowLocalHorizon = belowLocal,
+                LocalHorizonAltitude = localHorizon,
+            };
         }
 
         public static string FormatSeconds(double seconds) {

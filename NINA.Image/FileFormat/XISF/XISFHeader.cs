@@ -683,7 +683,7 @@ namespace NINA.Image.FileFormat.XISF {
             }
 
             AddImageProperty(XISFImageProperty.Observation.Equinox, 2000d, "Equinox of celestial coordinate system");
-            AddImageFITSKeyword("SWCREATE", string.Format("N.I.N.A. {0} ({1})", CoreUtil.Version, DllLoader.IsX86() ? "x86" : "x64"), "Software that created this file");
+            AddImageFITSKeyword("SWCREATE", CoreUtil.ImageFileCreator(), "Software that created this file");
 
             foreach (var elem in metaData.GenericHeaders) {
                 switch (elem) {

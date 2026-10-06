@@ -138,7 +138,13 @@ namespace NINA.Mac.App.Services {
 
         bool IsTracking { get; }
 
-        /// <summary>Slews to J2000 coordinates. Refuses targets below the horizon or above the keyhole limit (slew guard).</summary>
+        /// <summary>
+        /// A goto, soft park or slew-and-centre started through the app has not returned yet. The status bar shows its Stop from
+        /// this as well as from the polled <see cref="IsSlewing"/>, which a short goto can finish between two polls.
+        /// </summary>
+        bool IsMotionCommandActive { get; }
+
+        /// <summary>Slews to J2000 coordinates. Refuses targets below the horizon (and the local horizon) or above the keyhole limit (slew guard).</summary>
         Task SlewToAsync(double rightAscensionHours, double declinationDegrees, CancellationToken ct = default);
 
         Task SyncAsync(double rightAscensionHours, double declinationDegrees);
@@ -209,6 +215,19 @@ namespace NINA.Mac.App.Services {
         public static SessionProgress None { get; } = new(0, 0, null, null, null, TimeSpan.Zero);
     }
 
+    /// <summary>
+    /// What the plan check found before a run (Real devices: NINA.Mac.Sequencing's PlanValidator over tonight's sky with the
+    /// profile's horizon): warnings such as "Holds the sequence until dawn" or "Never reached", errors that stop the run, and
+    /// a one-line summary of the target's window tonight.
+    /// </summary>
+    public sealed record PlanCheck(IReadOnlyList<string> Warnings, IReadOnlyList<string> Errors, string Summary) {
+        public static PlanCheck Empty { get; } = new(Array.Empty<string>(), Array.Empty<string>(), null);
+
+        public bool HasErrors => Errors.Count > 0;
+
+        public bool HasWarnings => Warnings.Count > 0;
+    }
+
     /// <summary>The imaging run: expose, dither, stop at limits (simulated, or NINA's sequencer through the headless engine).</summary>
     public interface ISessionService {
 
@@ -224,6 +243,9 @@ namespace NINA.Mac.App.Services {
         IReadOnlyList<string> Log { get; }
 
         event EventHandler Changed;
+
+        /// <summary>Checks a plan against tonight's sky without running it (shown on the Run screen before Start).</summary>
+        PlanCheck CheckPlan(SessionPlan plan);
 
         Task RunAsync(SessionPlan plan, CancellationToken ct = default);
 

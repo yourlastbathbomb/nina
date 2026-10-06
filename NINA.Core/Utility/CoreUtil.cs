@@ -76,6 +76,12 @@ namespace NINA.Core.Utility {
         public static string Title => "N.I.N.A. - Nighttime Imaging 'N' Astronomy";
 
         public static string UserAgent => $"N.I.N.A./{Version} ({Environment.OSVersion}; {(Environment.Is64BitOperatingSystem ? "Win64" : "Win32")}; {(Environment.Is64BitProcess ? "x64" : "x86")})";
+
+        /// <summary>
+        /// The SWCREATE value written into saved FITS and XISF files. A host may replace it (the macOS fork names itself there);
+        /// the default is N.I.N.A.'s own "N.I.N.A. {Version} (x64|x86)".
+        /// </summary>
+        public static Func<string> ImageFileCreator { get; set; } = () => string.Format("N.I.N.A. {0} ({1})", Version, DllLoader.IsX86() ? "x86" : "x64");
         public static bool DebugMode { get; set; } = false;
 
         public static string GetUniqueFilePath(string fullPath) {

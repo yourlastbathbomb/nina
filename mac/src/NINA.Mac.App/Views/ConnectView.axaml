@@ -28,6 +28,16 @@
         </Grid>
       </Border>
 
+      <!-- Optical train: sets the focal length the solver, the FITS headers and the pixel scale use -->
+      <Border Classes="card">
+        <StackPanel Spacing="4">
+          <TextBlock Text="Optical train" Classes="h2" />
+          <RadioButton Name="TrainNative" GroupName="Train" IsChecked="{Binding UseNative}" Content="{Binding NativeTrainText}" />
+          <RadioButton Name="TrainReducer" GroupName="Train" IsChecked="{Binding UseReducer}" Content="{Binding ReducerTrainText}" />
+          <TextBlock Text="Pick what is fitted: plate solving takes its scale from this. The first night: the reducer (risk 4 in the plan). Focal lengths are in Settings › Optics." Classes="muted small" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
       <!-- Camera -->
       <Border Classes="card">
         <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
@@ -86,6 +96,35 @@
       </Border>
 
       <TextBlock Text="{Binding SimulationNote}" Classes="warn small" TextWrapping="Wrap" />
+
+      <!-- Preflight: the same checks as the command-line preflight flag -->
+      <Border Classes="card">
+        <StackPanel Spacing="6">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2">
+              <TextBlock Text="Preflight" Classes="h2" />
+              <TextBlock Text="Daytime or dusk: bundle, solvers, index tiles, Siril, disk, battery, site, horizon, tonight's dark hours and Moon, optical train. Opens nothing unless the camera scan is ticked." Classes="muted small" TextWrapping="Wrap" />
+              <CheckBox Name="PreflightWithDevices" IsChecked="{Binding PreflightWithDevices}" Content="Also look for the camera on USB (ZWO SDK scan; not while another app holds it)" />
+            </StackPanel>
+            <Button Grid.Column="1" Name="RunPreflightButton" Content="Run preflight" Command="{Binding RunPreflightCommand}" VerticalAlignment="Top" IsEnabled="{Binding !IsPreflightRunning}" />
+          </Grid>
+          <TextBlock Name="PreflightSummary" Text="{Binding PreflightSummary}" FontWeight="SemiBold" Classes.error="{Binding PreflightHasFailures}" TextWrapping="Wrap"
+                     IsVisible="{Binding PreflightSummary, Converter={x:Static ObjectConverters.IsNotNull}}" />
+          <ItemsControl Name="PreflightLines" ItemsSource="{Binding PreflightLines}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PreflightLineViewModel">
+                <Grid ColumnDefinitions="44,*" Margin="0,3">
+                  <TextBlock Text="{Binding Status}" Classes="mono" FontWeight="SemiBold" Classes.error="{Binding IsFail}" Classes.warn="{Binding IsWarn}" Classes.muted="{Binding IsOk}" />
+                  <StackPanel Grid.Column="1" Spacing="1">
+                    <TextBlock TextWrapping="Wrap"><Run Text="{Binding Name}" FontWeight="SemiBold" /><Run Text=": " /><Run Text="{Binding Detail}" /></TextBlock>
+                    <TextBlock Text="{Binding Fix}" Classes="muted small" TextWrapping="Wrap" IsVisible="{Binding HasFix}" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
     </StackPanel>
   </ScrollViewer>
 </UserControl>

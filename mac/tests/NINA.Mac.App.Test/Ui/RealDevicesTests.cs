@@ -57,7 +57,11 @@ namespace NINA.Mac.App.Test.Ui {
             }
         }
 
-        private static AppServices CreateReal(EmptyCameraList cameras, Action<EngineDevicesOptions> more = null) {
+        private static AppServices CreateReal(EmptyCameraList cameras, Action<EngineDevicesOptions> more = null) =>
+            CreateReal((_, _) => cameras, new[] { new NINA.Mac.Platform.SerialPortInfo("/dev/cu.usbserial-A10KX5Z3", true) }, more);
+
+        private static AppServices CreateReal(Func<NINA.Profile.Interfaces.IProfileService, NINA.Image.Interfaces.IExposureDataFactory, IDeviceChooserVM> cameras,
+                IReadOnlyList<NINA.Mac.Platform.SerialPortInfo> ports, Action<EngineDevicesOptions> more = null) {
             var settings = new AppSettings { DeviceSource = DeviceSource.Real };
             return AppServices.Create(new AppServicesOptions {
                 Clock = new ManualClock(TestTimes.EveningOct10),
@@ -65,10 +69,10 @@ namespace NINA.Mac.App.Test.Ui {
                 KeepAwake = new RecordingKeepAwake(),
                 PowerSource = new FakePowerSource(),
                 HomeDirectory = "/Users/test",
-                SerialPortLister = () => new[] { new NINA.Mac.Platform.SerialPortInfo("/dev/cu.usbserial-A10KX5Z3", true) },
+                SerialPortLister = () => ports,
                 ConfigureEngine = o => {
                     o.DataDirectory = EngineRuntime.DataDirectory == null ? EngineData : null;
-                    o.CameraChooser = (_, _) => cameras;
+                    o.CameraChooser = cameras;
                     more?.Invoke(o);
                 },
             });
@@ -129,6 +133,33 @@ namespace NINA.Mac.App.Test.Ui {
                     services.Camera.LastError.Should().Contain("No ZWO camera found");
                 });
             } finally {
+                OnUi(() => services.Dispose());
+            }
+        }
+
+        [Test]
+        public void ConnectAll_CoolsTheCamera_EvenWhenTheMountCannotConnect() {
+            // Daytime dark library, or an Autostar that does not answer at night: no serial adapter, the camera is on USB
+            NINA.Mac.App.Engine.Test.Fakes.FakeCamera camera = null;
+            AppServices services = null;
+            OnUi(() => services = CreateReal((profile, exposureDataFactory) => {
+                camera = new NINA.Mac.App.Engine.Test.Fakes.FakeCamera(exposureDataFactory, profileService: profile);
+                return new CameraList(camera);
+            }, Array.Empty<NINA.Mac.Platform.SerialPortInfo>()));
+            try {
+                var vm = OnUi(() => new MainWindowViewModel(services, Theme));
+                OnUi(() => vm.Connect.CoolAfterConnect = true);
+                OnUiAsync(() => vm.Connect.StartNightCommand.ExecuteAsync(null));
+                OnUi(() => {
+                    services.Mount.State.Should().NotBe(DeviceConnectionState.Connected);
+                    services.Camera.State.Should().Be(DeviceConnectionState.Connected);
+                    services.Camera.CoolerOn.Should().BeTrue("the camera cools whatever the mount does");
+                    camera.CoolerOn.Should().BeTrue();
+                    vm.Connect.ErrorMessage.Should().Contain("Mount: ").And.Contain("No USB serial adapter").And.Contain("cooling")
+                        .And.NotContain("Camera: ");
+                });
+            } finally {
+                OnUiAsync(() => services.Camera.DisconnectAsync());
                 OnUi(() => services.Dispose());
             }
         }
@@ -218,6 +249,25 @@ namespace NINA.Mac.App.Test.Ui {
             File.ReadAllText(file).Should().Contain("\"deviceSource\": \"Real\"");
             new JsonSettingsStore(file).Current.DeviceSource.Should().Be(DeviceSource.Real);
             new JsonSettingsStore(file).Current.Solver.AstapExecutable.Should().Be("~/Astro/astap/cli/astap_cli");
+        }
+
+        /// <summary>A fixed camera list (the gate picks the first device).</summary>
+        private sealed class CameraList : IDeviceChooserVM {
+
+            public CameraList(params IDevice[] devices) {
+                Devices = devices.ToList();
+            }
+
+            public IDevice SelectedDevice { get; set; }
+
+            public bool SetupDialogOpen => false;
+
+            public IList<IDevice> Devices { get; }
+
+            public Task GetEquipment() {
+                SelectedDevice ??= Devices.FirstOrDefault();
+                return Task.CompletedTask;
+            }
         }
 
         /// <summary>A camera list with no camera, counting its scans.</summary>

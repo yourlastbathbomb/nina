@@ -26,6 +26,8 @@ namespace NINA.Mac.App {
         /// exits (0 = pass), without showing a window. <c>--startup-check</c> sets up the real Avalonia.Native platform
         /// and lays out the main window without showing it (the smoke test runs it in a child process).
         /// <c>--gui-smoke</c> is a normal launch that shows the main window for a few seconds, checks it and quits.
+        /// <c>--preflight [--with-devices]</c> prints the daytime checklist (PASS/WARN/FAIL with fixes) and exits 1 on a FAIL.
+        /// <c>--stack-night [YYYY-MM-DD] [--dry-run]</c> stacks a night's targets with siril-cli (NINA.Mac.Siril's night processor).
         /// <c>--version</c> prints the version.
         /// </summary>
         [STAThread]
@@ -34,6 +36,12 @@ namespace NINA.Mac.App {
                 var info = AppInfo.Current;
                 Console.WriteLine($"{info.DisplayName} {info.Version} (based on N.I.N.A. {info.NinaBaseVersion})");
                 return 0;
+            }
+            if (args.Contains(StackNight.Flag)) {
+                return StackNight.Run(args, Console.Out);
+            }
+            if (args.Contains(PreflightRunner.Flag)) {
+                return PreflightRunner.RunCli(args, Console.Out);
             }
             if (args.Contains("--smoke-test")) {
                 return SmokeTest.Run(args, Console.Out);

@@ -25,4 +25,9 @@
     <ProjectReference Include="../../src/NINA.Mac.App/NINA.Mac.App.csproj" />
   </ItemGroup>
 
+  <!-- The engine tests' fake ZWO camera (linked read-only): Connect › Connect all with Real services and no mount -->
+  <ItemGroup>
+    <Compile Include="../NINA.Mac.App.Engine.Test/Fakes/FakeCamera.cs" Link="Linked/FakeCamera.cs" />
+  </ItemGroup>
+
 </Project>

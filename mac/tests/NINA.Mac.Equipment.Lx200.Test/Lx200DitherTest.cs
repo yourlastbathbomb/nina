@@ -47,7 +47,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             private readonly Task pump;
             private readonly List<(GuideDirections Direction, int Ms)> pulses = new();
 
-            public MountDither(Rig rig) {
+            public MountDither(Rig rig, int pumpIntervalMs = 100) {
                 var mediator = new Mock<ITelescopeMediator>();
                 mediator.Setup(m => m.PulseGuide(It.IsAny<GuideDirections>(), It.IsAny<int>()))
                     .Callback<GuideDirections, int>((direction, ms) => {
@@ -66,7 +66,7 @@ namespace NINA.Mac.Equipment.Lx200.Test {
                         }
                         Guider.UpdateDeviceInfo(info);
                         try {
-                            await Task.Delay(100, stop.Token);
+                            await Task.Delay(pumpIntervalMs, stop.Token);
                         } catch (OperationCanceledException) {
                             break;
                         }
@@ -101,9 +101,9 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             }
         }
 
-        private static async Task<MountDither> ConnectedDither(Rig rig) {
+        private static async Task<MountDither> ConnectedDither(Rig rig, int pumpIntervalMs = 100) {
             await rig.ConnectTelescope();
-            var dither = new MountDither(rig);
+            var dither = new MountDither(rig, pumpIntervalMs);
             (await dither.Guider.Connect(CancellationToken.None)).Should().BeTrue("the mount is connected");
             dither.Guider.WestEastGuideRate.Should().Be(10.0, "the driver reports the ':Rg' rate it set");
             return dither;
@@ -276,6 +276,93 @@ namespace NINA.Mac.Equipment.Lx200.Test {
             north.Should().BeInRange(299, 315);
             east.Should().BeInRange(199, 215);
             me.Utc.Should().BeOnOrAfter(qn.Utc, "the east move starts when the north move has stopped");
+        }
+
+        /// <summary>
+        /// Wave-7 M8 note: the driver serialises the axes, so with a short settle time NINA's DirectGuider could let a light start
+        /// while the second axis was still moving: it waits for the longer pulse and the settle time, then for the polled
+        /// TelescopeInfo.IsPulseGuiding, which TelescopeVM refreshes only every 2 s. The simulator is this rig's mount (firmware
+        /// 4.0g, ':GW#' unanswered, ':Mg' in alt-az), the profile's settle time is 0 and the info pump runs every 2 s as
+        /// TelescopeVM's does. Dither must return only after the mount has stopped the last pulse, and IsPulseGuiding must be true
+        /// from the first pulse until the last one has ended (simulator clock).
+        /// </summary>
+        [Test]
+        public async Task Firmware40g_DirectGuiderDither_ZeroSettle_TwoSecondPolling_EndsOnlyAfterTheSecondAxisStopped() {
+            var options = new SimOptions { PlanetaryUpdateSeconds = 0.2, SlewSeconds = 0.8 }
+                .Apply(new[] { "firmware=4.0g", "gw=none", "long=true", "lon=west360", "degree=df" });
+            using var rig = new Rig(options);
+            rig.Profile.GuiderSettings.SettleTime = 0;
+            rig.Profile.GuiderSettings.DitherPixels = 30;
+            rig.Profile.GuiderSettings.MountDitherMinimumPixels = 15;
+            using var dither = await ConnectedDither(rig, pumpIntervalMs: 2000);
+            rig.Telescope.EffectivePulseStrategy.Should().Be(Lx200PulseStrategy.NativePulse);
+            rig.Settings.SerializePulseAxes.Should().BeTrue("the default");
+
+            // sample the live flag against the simulator's clock while the dithers run
+            var samples = new List<(DateTime SimUtc, bool Guiding)>();
+            using var stopSampling = new CancellationTokenSource();
+            var sampler = Task.Run(async () => {
+                while (!stopSampling.IsCancellationRequested) {
+                    var guiding = rig.Telescope.IsPulseGuiding;
+                    var now = rig.SimOptions.UtcNow();
+                    lock (samples) {
+                        samples.Add((now, guiding));
+                    }
+                    await Task.Delay(3);
+                }
+            });
+
+            var checkedTwoAxes = 0;
+            for (var i = 0; i < 4; i++) {
+                var logStart = rig.SimLog.Count;
+                (await dither.Guider.Dither(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20))).Should().BeTrue();
+                var returned = rig.SimOptions.UtcNow();
+
+                var pulses = rig.SimLog.Skip(logStart).Where(e => e.Command.StartsWith(":Mg", StringComparison.Ordinal))
+                    .Select(e => (Start: e.Utc, End: e.Utc + TimeSpan.FromMilliseconds(int.Parse(e.Command[4..^1], CultureInfo.InvariantCulture))))
+                    .ToList();
+                pulses.Should().NotBeEmpty();
+                var lastEnd = pulses.Max(p => p.End);
+                TestContext.Out.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                    $"dither {i}: {pulses.Count} pulse(s) {string.Join(", ", pulses.Select(p => (p.End - p.Start).TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms"))}; Dither returned {(returned - lastEnd).TotalMilliseconds:0} ms after the mount stopped"));
+                returned.Should().BeOnOrAfter(lastEnd, "DirectGuider must not report the dither done (and let a light start) while an axis is still moving");
+                if (pulses.Count == 2) {
+                    checkedTwoAxes++;
+                    pulses[1].Start.Should().BeOnOrAfter(pulses[0].End, "the axes are serialised");
+                }
+
+                var firstStart = pulses.Min(p => p.Start);
+                List<(DateTime SimUtc, bool Guiding)> during;
+                lock (samples) {
+                    during = samples.Where(x => x.SimUtc >= firstStart && x.SimUtc <= lastEnd - TimeSpan.FromMilliseconds(1)).ToList();
+                }
+                during.Should().NotBeEmpty();
+                during.Should().OnlyContain(x => x.Guiding, "IsPulseGuiding stays true from the first pulse until every queued pulse has ended");
+            }
+            stopSampling.Cancel();
+            await sampler;
+            checkedTwoAxes.Should().BeGreaterThan(0, "at least one dither moved both axes (DirectGuider draws them at random)");
+            // the flag outlasts the mount by MountLatencyMargin (50 ms), and the last dither can return sooner than that after the stop
+            (await Rig.Eventually(() => !rig.Telescope.IsPulseGuiding, TimeSpan.FromSeconds(1))).Should().BeTrue("the flag drops once the margin has passed");
+        }
+
+        [Test]
+        public async Task SerialisedPulses_EachCallReturnsWhenItsPulseHasGoneOut_TheSecondAfterTheFirstEnded() {
+            using var rig = new Rig(configure: s => s.PulseStrategy = Lx200PulseStrategy.NativePulse);
+            var mount = await rig.ConnectTelescope();
+            await Task.Delay(300);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            mount.PulseGuide(GuideDirections.guideNorth, 600);
+            var first = sw.Elapsed;
+            mount.PulseGuide(GuideDirections.guideEast, 200);
+            var second = sw.Elapsed;
+            mount.IsPulseGuiding.Should().BeTrue("the second pulse is running");
+            first.Should().BeLessThan(TimeSpan.FromMilliseconds(300), "nothing was ahead: the call returns once ':Mgn0600#' is on the wire, long before the pulse ends");
+            second.Should().BeGreaterThan(TimeSpan.FromMilliseconds(550), "the second axis waits for the first, and so does its caller");
+            (await Rig.Eventually(() => !mount.IsPulseGuiding, TimeSpan.FromSeconds(5))).Should().BeTrue();
+            sw.Elapsed.Should().BeGreaterThan(TimeSpan.FromMilliseconds(800), "IsPulseGuiding lasts until the second pulse has ended");
+            rig.Received.Should().ContainInOrder(":Mgn0600#", ":Mge0200#");
         }
     }
 }

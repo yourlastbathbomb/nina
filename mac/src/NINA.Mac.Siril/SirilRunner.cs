@@ -43,9 +43,12 @@ namespace NINA.Mac.Siril {
         /// </summary>
         public string SeedConfigPath { get; set; } = UserSirilConfig;
 
-        /// <summary>The port's own siril-cli configuration, passed with -i. siril-cli rewrites it (wd=, any 'set').</summary>
+        /// <summary>
+        /// The app's own siril-cli configuration, passed with -i, in Nightglass's Application Support folder. siril-cli rewrites
+        /// it (wd=, any 'set'); the Siril GUI's configuration is only ever read (plan section 9, decision 8).
+        /// </summary>
         public string OwnConfigPath { get; set; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "Library", "Application Support", "NINA-mac", "siril", "siril-cli.ini");
+            "Library", "Application Support", "Nightglass", "siril", "siril-cli.ini");
 
         public TimeSpan Timeout { get; set; } = TimeSpan.FromHours(3);
     }
@@ -176,8 +179,13 @@ namespace NINA.Mac.Siril {
             return own;
         }
 
-        /// <summary>Runs a saved script. <paramref name="logPath"/> defaults to siril_&lt;script&gt;_&lt;time&gt;.log next to the script.</summary>
-        public async Task<SirilRunResult> RunAsync(string scriptPath, string workingDirectory, string logPath = null, CancellationToken token = default) {
+        /// <summary>
+        /// Runs a saved script. <paramref name="logPath"/> defaults to siril_&lt;script&gt;_&lt;time&gt;.log next to the script.
+        /// <paramref name="onLine"/> receives every log line as siril-cli prints it (ANSI escapes removed), from a reader thread,
+        /// so a host can stream the log; an exception it throws is ignored.
+        /// </summary>
+        public async Task<SirilRunResult> RunAsync(string scriptPath, string workingDirectory, string logPath = null, CancellationToken token = default,
+                Action<string> onLine = null) {
             if (!IsAvailable) {
                 throw new FileNotFoundException($"siril-cli not found at {Options.SirilCliPath}");
             }
@@ -223,6 +231,14 @@ namespace NINA.Mac.Siril {
                     lock (sync) {
                         lines.Add(clean);
                         writer.WriteLine(clean);
+                        writer.Flush();
+                    }
+                    if (onLine != null) {
+                        try {
+                            onLine(clean);
+                        } catch (Exception) {
+                            // a listener's failure must not stop the run or lose the log
+                        }
                     }
                 }
 

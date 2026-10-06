@@ -91,6 +91,24 @@ namespace NINA.Mac.App {
         public ICalibrationService Calibration { get; private set; }
         public ICentringService Centring { get; private set; }
 
+        /// <summary>
+        /// The site's local horizon: the file <see cref="UserDataPaths.HorizonFile"/> when it exists and reads, otherwise the
+        /// built-in estimate for Deep Water Bay (<see cref="HorizonProfile.SiteEstimate"/>, flagged by preflight). The slew guard,
+        /// the Target screen and, with Real devices, NINA's sequence use it.
+        /// </summary>
+        public HorizonProfile Horizon { get; private set; }
+
+        /// <summary>Why the horizon file could not be read (the estimate is used instead); null when it was fine or absent.</summary>
+        public string HorizonError { get; private set; }
+
+        /// <summary>Why settings.json could not be read at start-up (the app runs on defaults); null when it read, or once saved again.</summary>
+        public string SettingsLoadWarning => (Settings as JsonSettingsStore)?.LoadWarning;
+
+        /// <summary>Lines of the horizon file that were skipped.</summary>
+        public IReadOnlyList<string> HorizonWarnings { get; private set; } = Array.Empty<string>();
+
+        public event EventHandler HorizonChanged;
+
         public bool DevicesSimulated => Engine == null;
 
         /// <summary>The device source in use (the setting may say Real while <see cref="EngineError"/> forced the simulators).</summary>
@@ -119,6 +137,7 @@ namespace NINA.Mac.App {
                 Catalog = new BuiltInTargetCatalog(),
             };
             s.Settings = options.Settings ?? new JsonSettingsStore(new UserDataPaths(s.Info.Identity, s.HomeDirectory).SettingsFile);
+            s.LoadHorizon();
             s.Power = new PowerMonitor(options.PowerSource ?? (OperatingSystem.IsMacOS() ? new MacPowerSource() : new UnavailablePowerSource()));
             s.KeepAwakeService = options.KeepAwake ?? (OperatingSystem.IsMacOS() ? new MacKeepAwake() : new NullKeepAwake());
 
@@ -141,7 +160,7 @@ namespace NINA.Mac.App {
         }
 
         private void CreateSimulatedDevices(AppServicesOptions options) {
-            SimMount = new SimulatedMount(Clock, () => Settings.Current, options.SerialPortLister);
+            SimMount = new SimulatedMount(Clock, () => Settings.Current, options.SerialPortLister, () => Horizon);
             SimFocuser = new SimulatedFocuser(Clock, SimMount, Math.Clamp(Settings.Current.FocuserSpeed, 1, 4));
             SimCamera = new SimulatedCamera(Clock, () => SimFocuser.FocusErrorMicrons);
             if (options.FastSimulation) {
@@ -164,6 +183,7 @@ namespace NINA.Mac.App {
                 Clock = Clock,
                 HomeDirectory = HomeDirectory,
                 SerialPortLister = options.SerialPortLister,
+                Horizon = () => Horizon,
             };
             options.ConfigureEngine?.Invoke(engineOptions);
             Engine = EngineDevices.Create(engineOptions);
@@ -178,6 +198,45 @@ namespace NINA.Mac.App {
             AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
             // Settings › Save reaches the engine's NINA profile (site, optics, gain, solvers, image folder); during a run, at its end
             Settings.Changed += OnSettingsChanged;
+        }
+
+        private void LoadHorizon() {
+            var path = DataPaths.HorizonFile;
+            HorizonError = null;
+            HorizonWarnings = Array.Empty<string>();
+            if (!System.IO.File.Exists(path)) {
+                Horizon = HorizonProfile.SiteEstimate();
+                return;
+            }
+            try {
+                Horizon = HorizonProfile.Load(path, out var warnings);
+                HorizonWarnings = warnings;
+            } catch (Exception ex) when (ex is FormatException || ex is System.IO.IOException || ex is UnauthorizedAccessException || ex is ArgumentException) {
+                HorizonError = $"The horizon file {path} could not be read ({ex.Message}); the built-in estimate is used.";
+                Horizon = HorizonProfile.SiteEstimate();
+            }
+        }
+
+        /// <summary>
+        /// Saves a horizon edited on the Target screen to <see cref="UserDataPaths.HorizonFile"/> (NINA's plain .hrz format) and
+        /// uses it from now on: the slew guard at once, the engine's sequence too (after a run in progress ends). Returns a note
+        /// when the engine could not take it yet, or null.
+        /// </summary>
+        public string SaveHorizon(HorizonProfile horizon) {
+            ArgumentNullException.ThrowIfNull(horizon);
+            Horizon = horizon.Save(DataPaths.HorizonFile, Settings.Current.Site.Name, Clock.Now);
+            HorizonError = null;
+            HorizonWarnings = Array.Empty<string>();
+            string note = null;
+            if (Engine != null) {
+                if (!Engine.ApplyHorizon()) {
+                    note = "The run in progress keeps the old horizon; the new one applies when it ends.";
+                } else if (Engine.HorizonProblem is { } problem) {
+                    note = problem;
+                }
+            }
+            HorizonChanged?.Invoke(this, EventArgs.Empty);
+            return note;
         }
 
         private void OnSettingsChanged(object sender, EventArgs e) {

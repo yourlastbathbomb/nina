@@ -381,6 +381,8 @@ namespace NINA.Mac.Equipment.Lx200 {
                 }
             }
 
+            await WriteMountHighLimit(token).ConfigureAwait(false);
+
             var strategy = Settings.PulseStrategy;
             if (strategy == Lx200PulseStrategy.Auto) {
                 strategy = Lx200Firmware.IsStarPatch(firmware) ? Lx200PulseStrategy.NativePulse : Lx200PulseStrategy.HostTimedMove;
@@ -1057,6 +1059,11 @@ namespace NINA.Mac.Equipment.Lx200 {
             if (AlignmentLost("goto")) {
                 return false;
             }
+            var refusal = SlewGuardRefusal(coordinates);
+            if (refusal != null) {
+                Fail("goto refused by the driver's slew guard: " + refusal);
+                return false;
+            }
             if (!TrackingEnabled) {
                 // as NINA's AscomTelescope does before every RA/Dec slew (AscomTelescope.cs:563); NINA's sequences rely on it, e.g.
                 // after "Set Tracking: Stopped" or a soft park
@@ -1087,6 +1094,11 @@ namespace NINA.Mac.Equipment.Lx200 {
             }
             if (AtPark) {
                 Notification.ShowWarning("LX200: the mount is soft-parked; unpark it first");
+                return false;
+            }
+            var refusal = SlewGuardRefusal(coordinates.Altitude.Degree, coordinates.Azimuth.Degree, null);
+            if (refusal != null) {
+                Fail("alt-az goto refused by the driver's slew guard: " + refusal);
                 return false;
             }
             try {
@@ -1244,6 +1256,128 @@ namespace NINA.Mac.Equipment.Lx200 {
                 Logger.Info($"LX200: {purpose} cancelled; sent ':Q#'");
                 throw;
             }
+        }
+
+        // =============================================================================================
+        // Slew guard and the mount's high limit
+        // =============================================================================================
+
+        /// <summary>
+        /// The slew guard's verdict for an RA/Dec target (any epoch): null when the goto may go, otherwise why not. The target's
+        /// altitude and azimuth now come from NINA's own transform (SOFA, <see cref="Coordinates.Transform(Angle, Angle, double, DateTime)"/>)
+        /// at the profile's site and the driver's clock; see <see cref="Lx200Settings.SlewGuardEnabled"/>.
+        /// </summary>
+        internal string SlewGuardRefusal(Coordinates target) {
+            if (!Settings.SlewGuardEnabled || target == null) {
+                return null;
+            }
+            if (!TryGuardSite(out var latitude, out var longitude, out var elevation, out var siteNote)) {
+                return siteNote;
+            }
+            var now = DateTime.SpecifyKind(clock.UtcNow(), DateTimeKind.Utc);
+            double altitude, azimuth;
+            try {
+                var topo = target.Transform(Angle.ByDegree(latitude), Angle.ByDegree(longitude), elevation, now);
+                altitude = topo.Altitude.Degree;
+                azimuth = topo.Azimuth.Degree;
+            } catch (Exception ex) {
+                return $"the target's altitude could not be computed ({ex.Message}); the goto is not sent. Switch the slew guard off in the mount settings only if you are sure of the target.";
+            }
+            return SlewGuardRefusal(altitude, azimuth, string.Create(Inv, $" (computed for {SiteText(latitude, longitude)} at {now:HH:mm:ss} UTC{siteNote})"));
+        }
+
+        /// <summary>The slew guard's verdict for an alt-az target; null when it may go.</summary>
+        internal string SlewGuardRefusal(double altitude, double azimuth, string where) {
+            if (!Settings.SlewGuardEnabled) {
+                return null;
+            }
+            if (double.IsNaN(altitude) || double.IsNaN(azimuth)) {
+                return "the target's altitude is unknown (NaN); the goto is not sent";
+            }
+            var max = Settings.MaxAltitudeDegrees;
+            var horizon = profileService.ActiveProfile.AstrometrySettings.Horizon;
+            var horizonAltitude = horizon?.GetAltitude(Lx200Astro.Wrap(azimuth, 360.0)) ?? 0.0;
+            var horizonText = horizon != null
+                ? string.Create(Inv, $"the custom horizon ({horizonAltitude:0.0}° at that azimuth)")
+                : "the horizon (0°: no custom horizon is loaded)";
+            if (altitude < horizonAltitude) {
+                return string.Create(Inv,
+                    $"the target is at altitude {altitude:0.0}°, azimuth {azimuth:0.0}°, below {horizonText}{where}. Wait until it has risen, or pick another target.");
+            }
+            if (altitude > max) {
+                return string.Create(Inv,
+                    $"the target is at altitude {altitude:0.0}°, azimuth {azimuth:0.0}°, above the {max:0.#}° maximum altitude (the zenith keyhole of the alt-az fork){where}. Wait until it has sunk below {max:0.#}° (image it east or west of the meridian), or change the maximum altitude in the mount settings.");
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The site the guard computes with: the profile's; when the profile's site is unset (0, 0), the mount's own (":Gt#"/
+        /// ":Gg#" at connect). False with a refusal message when neither is known.
+        /// </summary>
+        private bool TryGuardSite(out double latitude, out double longitude, out double elevation, out string note) {
+            var site = profileService.ActiveProfile.AstrometrySettings;
+            latitude = site.Latitude;
+            longitude = site.Longitude;
+            elevation = site.Elevation;
+            note = string.Empty;
+            if (latitude != 0 || longitude != 0) {
+                return true;
+            }
+            lock (stateLock) {
+                latitude = mountLatitude;
+                longitude = mountLongitude;
+            }
+            if (!double.IsNaN(latitude) && !double.IsNaN(longitude)) {
+                note = ", the mount's site because the profile's is not set";
+                return true;
+            }
+            note = "the site is not set (the profile says 0° N 0° E and the mount's site could not be read), so the target's altitude is unknown and the goto is not sent. Set the site in the settings, or switch the slew guard off in the mount settings.";
+            return false;
+        }
+
+        private static string SiteText(double latitude, double longitude) =>
+            string.Create(Inv, $"{Math.Abs(latitude):0.000}°{(latitude < 0 ? "S" : "N")} {Math.Abs(longitude):0.000}°{(longitude < 0 ? "W" : "E")}");
+
+        /// <summary>The whole-degree value written with ":So" (the guard's maximum, rounded down so the mount's limit is never higher).</summary>
+        internal int MountHighLimitDegrees => (int)Math.Floor(Settings.MaxAltitudeDegrees);
+
+        /// <summary>
+        /// ":SoDD*#" (P07 l.804-808, reply '1'), then ":Gh#" to read it back, when <see cref="Lx200Settings.WriteMountHighLimitOnConnect"/>
+        /// is on. A refusal or a different read-back is reported; it does not stop the connect (the driver's own guard still holds).
+        /// </summary>
+        private async Task WriteMountHighLimit(CancellationToken token) {
+            if (!Settings.WriteMountHighLimitOnConnect) {
+                return;
+            }
+            var degrees = MountHighLimitDegrees;
+            var command = string.Create(Inv, $":So{degrees:00}*#");
+            var reply = await link.SendAsync(command, Lx200Lane.Command, token).ConfigureAwait(false);
+            if (!reply.IsOk || reply.Value != "1") {
+                var message = $"the mount did not accept the high limit {command} ({reply.Describe()}); the driver's own slew guard still refuses gotos above {Settings.MaxAltitudeDegrees.ToString("0.#", Inv)}°";
+                Logger.Warning("LX200: " + message);
+                Notification.ShowWarning("LX200: " + message);
+                return;
+            }
+            var back = await link.SendAsync(":Gh#", Lx200Lane.Command, token).ConfigureAwait(false);
+            var read = back.IsOk ? ParseLimitDegrees(back.Value) : null;
+            if (read == degrees) {
+                Logger.Info(string.Create(Inv, $"LX200: the mount's high limit is {degrees}° ({command}, read back with ':Gh#')"));
+            } else {
+                var message = string.Create(Inv, $"the mount accepted {command} but ':Gh#' reads {(read.HasValue ? read.Value + "°" : back.Describe())}; the driver's own slew guard still refuses gotos above {Settings.MaxAltitudeDegrees:0.#}°");
+                Logger.Warning("LX200: " + message);
+                Notification.ShowWarning("LX200: " + message);
+            }
+        }
+
+        /// <summary>":Gh#"/":Go#" replies: an optional sign, digits, then the degree sign ('*' or 0xDF) and maybe '#'.</summary>
+        internal static int? ParseLimitDegrees(string reply) {
+            var m = System.Text.RegularExpressions.Regex.Match(reply ?? string.Empty, @"^\s*([+-]?)(\d{1,3})");
+            if (!m.Success) {
+                return null;
+            }
+            var value = int.Parse(m.Groups[2].Value, NumberStyles.None, Inv);
+            return m.Groups[1].Value == "-" ? -value : value;
         }
 
         /// <summary>True (and reported) when ":GW#" went from aligned to not aligned during this session: every goto would be wrong.</summary>
@@ -1551,7 +1685,12 @@ namespace NINA.Mac.Equipment.Lx200 {
 
         public double GuideRateDeclinationArcsecPerSec => Settings.GuideRateArcsecPerSec;
 
-        /// <summary>Returns at once; the pulse runs on the link (<see cref="Lx200PulseGuider"/>). <see cref="IsPulseGuiding"/> stays true until it ends.</summary>
+        /// <summary>
+        /// The pulse runs on the link (<see cref="Lx200PulseGuider"/>); <see cref="IsPulseGuiding"/> stays true until it ends. With
+        /// serialised axes (the default) it returns once this pulse has gone out to the mount, after any pulse ahead of it has ended
+        /// (ASCOM's rule for a mount that cannot move both axes at once), so NINA's DirectGuider, which times its wait from this
+        /// call, cannot end a dither while an axis is still moving.
+        /// </summary>
         public void PulseGuide(GuideDirections direction, int duration) {
             var guider = pulseGuider;
             if (guider == null || !Connected) {
@@ -1610,6 +1749,7 @@ namespace NINA.Mac.Equipment.Lx200 {
                         Logger.Warning($"LX200: guide rate not set again after the reconnect ({rg.Describe()})");
                     }
                 }
+                await WriteMountHighLimit(token).ConfigureAwait(false);
                 await RefreshStatus(token).ConfigureAwait(false);
                 try {
                     await CheckClock(timeSync: false, token).ConfigureAwait(false);

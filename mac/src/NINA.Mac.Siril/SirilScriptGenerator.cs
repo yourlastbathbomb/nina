@@ -104,6 +104,13 @@ namespace NINA.Mac.Siril {
         /// <summary>Absolute master-dark path with Siril header tokens (DarkLibrary.MasterDarkPathTemplate).</summary>
         public string MasterDarkPathTemplate { get; set; }
 
+        /// <summary>
+        /// With <see cref="DarkSource.Library"/>: an explicit master (absolute path, no tokens), e.g. the one
+        /// <see cref="MasterDarkIndex.Find"/> chose within its temperature tolerance. It replaces the header-token template, so
+        /// Siril no longer picks the master itself; null: the template.
+        /// </summary>
+        public string MasterDarkPath { get; set; }
+
         public DarkSource Dark { get; set; } = DarkSource.Library;
 
         public FlatSource Flat { get; set; } = FlatSource.Folder;
@@ -256,7 +263,7 @@ namespace NINA.Mac.Siril {
                 b.Cd(wd);
                 darkArgument = "-dark=" + darkMaster;
             } else if (plan.Dark == DarkSource.Library) {
-                darkArgument = "-dark=" + plan.MasterDarkPathTemplate;
+                darkArgument = "-dark=" + (plan.MasterDarkPath ?? plan.MasterDarkPathTemplate);
             }
 
             b.Blank();
@@ -269,7 +276,11 @@ namespace NINA.Mac.Siril {
             var calibrate = new List<string> { "light" };
             if (darkArgument != null) {
                 calibrate.Add(plan.Dark == DarkSource.Library ? darkArgument : RelativeOption(b, darkArgument));
-                if (plan.Dark == DarkSource.Library) {
+                if (plan.Dark == DarkSource.Library && plan.MasterDarkPath != null) {
+                    b.Blank();
+                    b.Comment("Master dark from the library, chosen by the engine's dark-library index (exposure, gain, offset,");
+                    b.Comment("binning, camera and temperature within tolerance).");
+                } else if (plan.Dark == DarkSource.Library) {
                     b.Blank();
                     b.Comment("Master dark from the library: Siril fills the $KEY:fmt$ tokens from the first light's header and");
                     b.Comment("stops the script if no master matches (exposure, gain, offset, set-point, binning).");
@@ -365,7 +376,7 @@ namespace NINA.Mac.Siril {
 
         private static void Header(SirilScriptBuilder b, SirilPreprocessingPlan plan, string wd) {
             b.Comment("############################################");
-            b.Comment($"NINA-mac Siril preprocessing: {plan.Title ?? Path.GetFileName(wd)}");
+            b.Comment($"Nightglass Siril preprocessing: {plan.Title ?? Path.GetFileName(wd)}");
             b.Comment(plan.Mode == ProcessingMode.Rgb
                 ? "Steps of Siril 1.4.4 OSC_Preprocessing v1.4 (C) Cyril Richard"
                 : "Steps of Siril 1.4.4 OSC_Extract_HaOIII v1.5 (C) Cyril Richard");
@@ -416,9 +427,14 @@ namespace NINA.Mac.Siril {
             if (string.IsNullOrWhiteSpace(plan.WorkingDirectory) || !Path.IsPathRooted(plan.WorkingDirectory)) {
                 throw new ArgumentException("WorkingDirectory must be an absolute path");
             }
-            if (plan.Dark == DarkSource.Library) {
+            if (plan.Dark == DarkSource.Library && plan.MasterDarkPath != null) {
+                if (!Path.IsPathRooted(plan.MasterDarkPath) || SirilPathTemplate.HasTokens(plan.MasterDarkPath)) {
+                    throw new ArgumentException("MasterDarkPath must be an absolute path without Siril tokens ('$')");
+                }
+                EnsureSirilSafeDirectory(Path.GetDirectoryName(plan.MasterDarkPath), "master-dark library");
+            } else if (plan.Dark == DarkSource.Library) {
                 if (string.IsNullOrWhiteSpace(plan.MasterDarkPathTemplate) || !Path.IsPathRooted(plan.MasterDarkPathTemplate)) {
-                    throw new ArgumentException("DarkSource.Library needs an absolute MasterDarkPathTemplate");
+                    throw new ArgumentException("DarkSource.Library needs an absolute MasterDarkPathTemplate (or a MasterDarkPath)");
                 }
                 EnsureSirilSafeDirectory(Path.GetDirectoryName(plan.MasterDarkPathTemplate), "master-dark library");
             }

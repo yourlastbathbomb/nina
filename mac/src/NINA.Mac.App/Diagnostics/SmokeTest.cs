@@ -150,6 +150,20 @@ namespace NINA.Mac.App {
             // Real devices composed through the headless engine without opening anything (engine assemblies, NINA's data, natives)
             Check("engine (Real devices composed, nothing opened)", EngineSmoke.Run);
 
+            // Preflight without devices, against this user's settings (its results are printed; only the bundle checks, or a check
+            // that crashed, fail the smoke test: a missing ASTAP on the build machine is the operator's business, not the bundle's)
+            Check("preflight (no devices)", () => {
+                var report = Preflight.Run(PreflightRunner.ForUser(withDevices: false, liveEphemeris: true));
+                foreach (var line in report.Format().TrimEnd('\n').Split('\n')) {
+                    output.WriteLine($"    {line}");
+                }
+                var broken = report.Items.Where(i => i.Status == PreflightStatus.Fail && (i.IsBundleCheck || i.Detail.StartsWith("the check itself failed", StringComparison.Ordinal))).ToArray();
+                if (broken.Length > 0) {
+                    throw new InvalidOperationException(string.Join("; ", broken.Select(i => $"{i.Name}: {i.Detail}")));
+                }
+                return $"{report.Items.Count} checks in {report.Duration.TotalMilliseconds:0} ms; bundle checks pass; {report.Summary}";
+            });
+
             // The real launch path (Avalonia.Native + Skia + HarfBuzz) in a child process: the headless platform below
             // registers its own text shaper, so it cannot show that Program.BuildAvaloniaApp() is complete.
             Check("native startup (Avalonia.Native, child process)", () => StartupCheck.RunInChildProcess(TimeSpan.FromSeconds(60)));

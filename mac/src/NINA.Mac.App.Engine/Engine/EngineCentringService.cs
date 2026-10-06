@@ -53,6 +53,8 @@ namespace NINA.Mac.App.Engine {
             // A halt (the mount's Abort, a disconnect, quitting) ends the whole operation, not only the goto it interrupts
             using var halt = CancellationTokenSource.CreateLinkedTokenSource(ct, engine.Mount.HaltToken);
             ct = halt.Token;
+            // The status bar's Stop stays up for the whole operation, the solve frames and re-slews included
+            using var motion = engine.Mount.BeginMotion();
             progress?.Report("Slewing…");
             await engine.Mount.SlewToAsync(rightAscensionHours, declinationDegrees, ct);
             if (!CanPlateSolve) {

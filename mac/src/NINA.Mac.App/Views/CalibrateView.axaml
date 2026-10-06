@@ -50,7 +50,7 @@
           <TextBlock Name="CalibrationStatus" Text="{Binding Status}" FontWeight="SemiBold" />
           <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="1" Height="8" />
           <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" HorizontalAlignment="Left" />
-          <TextBlock Text="Folders follow Siril's OSC_Preprocessing layout: biases, darks, flats shared per night; lights per target." Classes="muted small" TextWrapping="Wrap" />
+          <TextBlock Text="Folders follow NINA.Mac.Siril's layout: flats and biases shared per night, darks in the dark library (library/darks), lights per target." Classes="muted small" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
     </StackPanel>

@@ -34,9 +34,10 @@ namespace NINA.Mac.App.ViewModels {
             Connect = new ConnectViewModel(services);
             Cool = new CoolViewModel(services);
             Focus = new FocusViewModel(services);
-            Run = new RunViewModel(services);
-            Target = new TargetViewModel(services, this, Run);
             Calibrate = new CalibrateViewModel(services);
+            // A run started during a calibration can cancel it (the camera is needed for the lights)
+            Run = new RunViewModel(services, () => Calibrate.CancelCommand.Execute(null));
+            Target = new TargetViewModel(services, this, Run);
             Teardown = new TeardownViewModel(services);
             Settings = new SettingsViewModel(services, theme, About);
             Pages = new PageViewModel[] { Connect, Cool, Focus, Target, Run, Calibrate, Teardown, Settings };

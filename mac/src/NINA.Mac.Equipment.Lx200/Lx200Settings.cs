@@ -179,6 +179,36 @@ namespace NINA.Mac.Equipment.Lx200 {
             set => store.SetValueEnum(nameof(DateConvention), value);
         }
 
+        /// <summary>
+        /// The driver's own slew guard (defence in depth below the app's checks): <see cref="Lx200Telescope.SlewToCoordinates"/>
+        /// and <see cref="Lx200Telescope.SlewToAltAz"/> refuse a target whose altitude now, at the profile's site (NINA's own
+        /// transform), is below the profile's custom horizon (0° without one) or above <see cref="MaxAltitudeDegrees"/>. Soft
+        /// park and dither offsets are not checked. On by default.
+        /// </summary>
+        public bool SlewGuardEnabled {
+            get => store.GetValueBoolean(nameof(SlewGuardEnabled), true);
+            set => store.SetValueBoolean(nameof(SlewGuardEnabled), value);
+        }
+
+        /// <summary>
+        /// Highest altitude a goto may go to: the zenith keyhole of the alt-az fork (MAC_PORT_PLAN section 6, decision 5: 75°).
+        /// Used by the slew guard and, when <see cref="WriteMountHighLimitOnConnect"/> is on, written to the mount with ":So".
+        /// </summary>
+        public double MaxAltitudeDegrees {
+            get => Math.Clamp(store.GetValueDouble(nameof(MaxAltitudeDegrees), 75.0), 1.0, 90.0);
+            set => store.SetValueDouble(nameof(MaxAltitudeDegrees), value);
+        }
+
+        /// <summary>
+        /// Write <see cref="MaxAltitudeDegrees"/> (whole degrees, rounded down) to the Autostar as its high limit (":SoDD*#", P07
+        /// l.804-808) at every connect and reconnect, then read it back with ":Gh#". The Autostar keeps the value in its own
+        /// memory (a configuration write). Off by default until the bench shows that firmware 4.0g accepts and honours ":So".
+        /// </summary>
+        public bool WriteMountHighLimitOnConnect {
+            get => store.GetValueBoolean(nameof(WriteMountHighLimitOnConnect), false);
+            set => store.SetValueBoolean(nameof(WriteMountHighLimitOnConnect), value);
+        }
+
         /// <summary>The mount keeps its site to 1' (":Gt#" sDD*MM, ":Gg#" sDDD*MM); within this, the profile's value is reported (RIM MNT-14).</summary>
         public double SiteToleranceArcmin {
             get => store.GetValueDouble(nameof(SiteToleranceArcmin), 1.0);

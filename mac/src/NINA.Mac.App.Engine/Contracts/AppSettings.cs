@@ -177,8 +177,8 @@ namespace NINA.Mac.App.Services {
 
         public string FilePath { get; }
 
-        /// <summary>Set when the file existed but could not be read.</summary>
-        public string LoadWarning { get; }
+        /// <summary>Set when the file existed but could not be read; cleared once the settings are saved (the file is good again).</summary>
+        public string LoadWarning { get; private set; }
 
         public event EventHandler Changed;
 
@@ -199,11 +199,18 @@ namespace NINA.Mac.App.Services {
                 File.WriteAllText(temp, JsonSerializer.Serialize(copy, SettingsJsonContext.Default.AppSettings));
                 File.Move(temp, FilePath, overwrite: true);
                 current = copy;
+                LoadWarning = null;
             }
             Changed?.Invoke(this, EventArgs.Empty);
         }
 
-        internal static AppSettings Load(string filePath, out string warning) {
+        /// <summary>
+        /// Reads the settings without the side effect of keeping a bad file aside (for diagnostics such as <c>--preflight</c>,
+        /// which must not write). Same result and warning as the store's own load.
+        /// </summary>
+        public static AppSettings Peek(string filePath, out string warning) => Load(filePath, out warning, keepBadCopy: false);
+
+        internal static AppSettings Load(string filePath, out string warning, bool keepBadCopy = true) {
             warning = null;
             if (!File.Exists(filePath)) {
                 return new AppSettings();
@@ -216,6 +223,10 @@ namespace NINA.Mac.App.Services {
                 return settings;
             } catch (Exception ex) when (ex is JsonException || ex is IOException || ex is NotSupportedException) {
                 var bad = filePath + ".bad";
+                if (!keepBadCopy) {
+                    warning = $"Settings file could not be read ({ex.Message}); the app starts on defaults and keeps the old file as {Path.GetFileName(bad)}.";
+                    return new AppSettings();
+                }
                 try {
                     File.Copy(filePath, bad, overwrite: true);
                 } catch (IOException) {

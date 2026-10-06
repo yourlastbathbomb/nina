@@ -88,6 +88,7 @@ namespace NINA.Mac.Siril {
                     Error($"Lights differ in {key} ({string.Join(", ", values.Select(v => v ?? "missing"))}); Siril picks the master dark from the first light only, so one folder must hold one setting");
                 }
             }
+            var offTemperature = new List<(string Name, double Ccd, double Set)>();
             foreach (var (path, header) in headers) {
                 var type = header.GetString("IMAGETYP");
                 if (type != null && !type.Equals("LIGHT", StringComparison.OrdinalIgnoreCase)) {
@@ -96,8 +97,16 @@ namespace NINA.Mac.Siril {
                 var set = header.GetDouble("SET-TEMP");
                 var ccd = header.GetDouble("CCD-TEMP");
                 if (set.HasValue && ccd.HasValue && Math.Abs(set.Value - ccd.Value) > 1.0) {
-                    Warn($"{Path.GetFileName(path)}: CCD-TEMP {ccd.Value.ToString("0.0", CultureInfo.InvariantCulture)} is more than 1 °C from SET-TEMP {set.Value.ToString("0.0", CultureInfo.InvariantCulture)}");
+                    offTemperature.Add((Path.GetFileName(path), ccd.Value, set.Value));
                 }
+            }
+            if (offTemperature.Count == 1) {
+                var (name, ccd, set) = offTemperature[0];
+                Warn(string.Create(CultureInfo.InvariantCulture, $"{name}: CCD-TEMP {ccd:0.0} is more than 1 °C from SET-TEMP {set:0.0}"));
+            } else if (offTemperature.Count > 1) {
+                // one line for the folder, not one per frame: a cooler without power puts every light here
+                Warn(string.Create(CultureInfo.InvariantCulture,
+                    $"{offTemperature.Count} of {headers.Count} lights have CCD-TEMP more than 1 °C from SET-TEMP (CCD-TEMP {offTemperature.Min(o => o.Ccd):0.0} to {offTemperature.Max(o => o.Ccd):0.0}, SET-TEMP {offTemperature[0].Set:0.0}; first {offTemperature[0].Name})"));
             }
             if (reference.GetString("BAYERPAT") == null) {
                 Error("Lights have no BAYERPAT: ZWO Mono-bin was on or the profile Bayer pattern is None; Siril would debayer with its fallback pattern (SIR-07)");
@@ -126,7 +135,9 @@ namespace NINA.Mac.Siril {
                     Error("Synthetic flat offset needs a positive whole multiplier N for -bias=\"=N*$OFFSET\" (measure it once from biases and round it)");
                 }
             }
-            if (plan.Dark == DarkSource.Library) {
+            if (plan.Dark == DarkSource.Library && plan.MasterDarkPath != null) {
+                CheckExplicitMaster(plan.MasterDarkPath, size, Error);
+            } else if (plan.Dark == DarkSource.Library) {
                 CheckLibraryMaster(plan.MasterDarkPathTemplate, reference, size, Error, Warn);
             }
             return issues;
@@ -165,6 +176,22 @@ namespace NINA.Mac.Siril {
                 }
             } catch (Exception ex) when (ex is IOException || ex is InvalidDataException) {
                 error($"{Path.GetFileName(expected)}: {ex.Message}");
+            }
+        }
+
+        /// <summary>An explicit master (chosen by <see cref="MasterDarkIndex"/>) must exist and have the lights' size.</summary>
+        private static void CheckExplicitMaster(string path, (int?, int?) size, Action<string> error) {
+            if (!File.Exists(path)) {
+                error($"The master dark {path} does not exist; Siril would abort");
+                return;
+            }
+            try {
+                var master = FitsFile.ReadHeader(path);
+                if ((master.GetInt("NAXIS1"), master.GetInt("NAXIS2")) != size) {
+                    error($"{Path.GetFileName(path)} is {master.GetInt("NAXIS1")}x{master.GetInt("NAXIS2")}, lights are {size.Item1}x{size.Item2}");
+                }
+            } catch (Exception ex) when (ex is IOException || ex is InvalidDataException) {
+                error($"{Path.GetFileName(path)}: {ex.Message}");
             }
         }
 

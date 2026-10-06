@@ -15,6 +15,24 @@
           <Run Text="Frames go to" />
           <Run Name="OutputFolderRun" Text="{Binding OutputFolder, TargetNullValue='—'}" />
         </TextBlock>
+        <TextBlock Name="PlanCheckSummary" Text="{Binding PlanCheckSummary}" Classes="muted small" TextWrapping="Wrap"
+                   IsVisible="{Binding PlanCheckSummary, Converter={x:Static ObjectConverters.IsNotNull}}" />
+        <ItemsControl Name="PlanErrors" ItemsSource="{Binding PlanErrors}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <TextBlock Text="{Binding StringFormat='Plan error: {0}'}" Classes="error" TextWrapping="Wrap" Margin="0,2" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <ItemsControl Name="PlanWarnings" ItemsSource="{Binding PlanWarnings}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <TextBlock Text="{Binding StringFormat='Plan check: {0}'}" Classes="warn" TextWrapping="Wrap" Margin="0,2" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Name="CalibrationConflict" Text="{Binding CalibrationConflict}" Classes="warn" TextWrapping="Wrap"
+                   IsVisible="{Binding CalibrationConflict, Converter={x:Static ObjectConverters.IsNotNull}}" />
         <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
           <Button Name="StartButton" Classes="accent" Content="Start" Command="{Binding StartCommand}" IsEnabled="{Binding CanStart}" Padding="20,8" />
           <Button Name="PauseButton" Content="Pause / resume" Command="{Binding PauseOrResumeCommand}" IsEnabled="{Binding IsRunning}" />

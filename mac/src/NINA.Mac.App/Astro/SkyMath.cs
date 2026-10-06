@@ -178,6 +178,72 @@ namespace NINA.Mac.App.Astro {
             return null;
         }
 
+        /// <summary>
+        /// Geocentric Moon, low precision (Astronomical Almanac "low precision formulae for the Moon": about 0.3° in position,
+        /// 0.003° in parallax, 1950-2050). Returns J2000-ish equatorial coordinates and the horizontal parallax in degrees.
+        /// </summary>
+        public static (double RightAscensionHours, double DeclinationDegrees, double ParallaxDegrees) MoonPosition(DateTimeOffset time) {
+            var t = (JulianDate(time) - J2000) / 36525.0;
+            double S(double a) => Math.Sin(NormalizeDegrees(a) * Deg);
+            double C(double a) => Math.Cos(NormalizeDegrees(a) * Deg);
+            var lambda = 218.32 + (481267.881 * t)
+                + (6.29 * S(135.0 + (477198.87 * t))) - (1.27 * S(259.3 - (413335.36 * t)))
+                + (0.66 * S(235.7 + (890534.22 * t))) + (0.21 * S(269.9 + (954397.74 * t)))
+                - (0.19 * S(357.5 + (35999.05 * t))) - (0.11 * S(186.5 + (966404.03 * t)));
+            var beta = (5.13 * S(93.3 + (483202.02 * t))) + (0.28 * S(228.2 + (960400.89 * t)))
+                - (0.28 * S(318.3 + (6003.15 * t))) - (0.17 * S(217.6 - (407332.21 * t)));
+            var parallax = 0.9508 + (0.0518 * C(135.0 + (477198.87 * t))) + (0.0095 * C(259.3 - (413335.36 * t)))
+                + (0.0078 * C(235.7 + (890534.22 * t))) + (0.0028 * C(269.9 + (954397.74 * t)));
+            var l = NormalizeDegrees(lambda) * Deg;
+            var b = beta * Deg;
+            var e = (23.4393 - (0.0130 * t)) * Deg;
+            var x = Math.Cos(b) * Math.Cos(l);
+            var y = (Math.Cos(e) * Math.Cos(b) * Math.Sin(l)) - (Math.Sin(e) * Math.Sin(b));
+            var z = (Math.Sin(e) * Math.Cos(b) * Math.Sin(l)) + (Math.Cos(e) * Math.Sin(b));
+            var ra = Math.Atan2(y, x);
+            var dec = Math.Asin(Math.Clamp(z, -1, 1));
+            return (NormalizeHours(ra / Deg / 15.0), dec / Deg, parallax);
+        }
+
+        /// <summary>Topocentric Moon altitude (geocentric altitude minus parallax in altitude) and azimuth.</summary>
+        public static (double Altitude, double Azimuth) MoonAltAz(DateTimeOffset time, GeoSite site) {
+            var (ra, dec, parallax) = MoonPosition(time);
+            var (alt, az) = ToAltAz(time, ra, dec, site);
+            return (alt - (parallax * Math.Cos(alt * Deg)), az);
+        }
+
+        /// <summary>Illuminated fraction of the Moon's disc, 0 (new) to 1 (full), from the Sun-Moon elongation.</summary>
+        public static double MoonIllumination(DateTimeOffset time) {
+            var (sr, sd) = SunPosition(time);
+            var (mr, md, _) = MoonPosition(time);
+            var cosElongation = (Math.Sin(sd * Deg) * Math.Sin(md * Deg)) + (Math.Cos(sd * Deg) * Math.Cos(md * Deg) * Math.Cos((sr - mr) * 15 * Deg));
+            return (1 - Math.Clamp(cosElongation, -1, 1)) / 2;
+        }
+
+        /// <summary>Angular separation of two equatorial positions, degrees.</summary>
+        public static double Separation(double ra1Hours, double dec1Degrees, double ra2Hours, double dec2Degrees) {
+            var cos = (Math.Sin(dec1Degrees * Deg) * Math.Sin(dec2Degrees * Deg)) + (Math.Cos(dec1Degrees * Deg) * Math.Cos(dec2Degrees * Deg) * Math.Cos((ra1Hours - ra2Hours) * 15 * Deg));
+            return Math.Acos(Math.Clamp(cos, -1, 1)) / Deg;
+        }
+
+        /// <summary>
+        /// Tonight's astronomical darkness (Sun below -18°) as seen from <paramref name="from"/>: when it is dark now, from now
+        /// to the next dawn; otherwise from the next dusk to the dawn after it. Null when there is no astronomical darkness
+        /// within 24 h.
+        /// </summary>
+        public static (DateTimeOffset Dusk, DateTimeOffset Dawn, bool DarkNow)? AstronomicalNight(DateTimeOffset from, GeoSite site) {
+            if (SunAltitude(from, site) < -18.0) {
+                var dawnNow = NextAstronomicalDawn(from, site);
+                return dawnNow is { } d ? (from, d, true) : null;
+            }
+            var dusk = FindCrossing(t => SunAltitude(t, site), from, TimeSpan.FromHours(24), -18.0, rising: false);
+            if (dusk is not { } start) {
+                return null;
+            }
+            var dawn = NextAstronomicalDawn(start, site);
+            return dawn is { } end ? (start, end, false) : null;
+        }
+
         /// <summary>Next astronomical dawn (Sun rising through -18 deg) within 24 h, or null (e.g. no true night).</summary>
         public static DateTimeOffset? NextAstronomicalDawn(DateTimeOffset from, GeoSite site) =>
             FindCrossing(t => SunAltitude(t, site), from, TimeSpan.FromHours(24), -18.0, rising: true);

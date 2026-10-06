@@ -23,7 +23,7 @@ namespace NINA.Mac.App.Services.Simulation {
     /// <summary>
     /// Stand-in for the headless sequencer: slew (and, later, centre), then expose with mount dithers, stopping at
     /// the max-altitude keyhole, the minimum altitude and astronomical dawn. Writes nothing to disk; the file names
-    /// it reports follow <see cref="SessionLayout"/>.
+    /// it reports follow <see cref="SessionLayout"/>, NINA.Mac.Siril's layout as the Real devices write it.
     /// </summary>
     public sealed class SimulatedSession : ISessionService {
         private const int MaxLogLines = 200;
@@ -93,6 +93,10 @@ namespace NINA.Mac.App.Services.Simulation {
             }
         }
 
+        /// <summary>The simulators have no plan validator (that is NINA.Mac.Sequencing's, with Real devices); the Target screen's warnings apply.</summary>
+        public PlanCheck CheckPlan(SessionPlan plan) => new(Array.Empty<string>(), Array.Empty<string>(),
+            "Simulated devices: NINA's plan check (window, horizon, keyhole, dawn) runs with Real devices. The Target screen's warnings still apply.");
+
         public async Task RunAsync(SessionPlan newPlan, CancellationToken ct = default) {
             ArgumentNullException.ThrowIfNull(newPlan);
             if (newPlan.FrameCount < 1 || newPlan.ExposureSeconds <= 0) {
@@ -135,7 +139,8 @@ namespace NINA.Mac.App.Services.Simulation {
                         break;
                     }
                     var frame = await camera.ExposeAsync(new ExposureRequest(FrameType.Light, newPlan.ExposureSeconds, newPlan.Gain, newPlan.Offset, newPlan.Bin), token);
-                    var file = layout.FramePath(FrameType.Light, newPlan.TargetName, newPlan.ExposureSeconds, newPlan.Gain, newPlan.Bin, frame.SensorTemperature, i);
+                    var file = layout.FramePath(FrameType.Light, newPlan.TargetName, newPlan.ExposureSeconds, newPlan.Gain, newPlan.Bin, frame.SensorTemperature, i,
+                        frame.Completed - TimeSpan.FromSeconds(newPlan.ExposureSeconds), newPlan.Offset, camera.CoolerOn ? camera.TargetTemperature : null);
                     lock (lockobj) {
                         progress = new SessionProgress(i, newPlan.FrameCount, frame.Hfr, file, null, clock.Now - start);
                     }

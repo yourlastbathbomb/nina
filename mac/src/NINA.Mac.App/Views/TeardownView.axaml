@@ -29,7 +29,7 @@
             <Button Name="RunTeardownButton" Classes="accent" Content="Run teardown" Command="{Binding RunTeardownCommand}" IsEnabled="{Binding !IsRunning}" Padding="20,8" />
             <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" />
           </StackPanel>
-          <TextBlock Text="Soft park never sends the mount to Dec +89° (the blocked north); it points low in the south and stops tracking." Classes="muted small" TextWrapping="Wrap" />
+          <TextBlock Name="SoftParkNote" Text="{Binding SoftParkNote}" Classes="muted small" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
 
@@ -37,7 +37,9 @@
         <StackPanel Spacing="6">
           <TextBlock Text="Tonight's frames" Classes="h2" />
           <SelectableTextBlock Name="NightFolder" Text="{Binding NightFolder}" Classes="mono" TextWrapping="Wrap" />
-          <TextBlock Text="Stack with Siril 1.4 (OSC_Preprocessing; OSC_Extract_HaOIII for the ALP-T):" Classes="muted small" Margin="0,6,0,0" />
+          <TextBlock Text="Stack the whole night in Terminal (master darks from the library, calibration, debayer, registration on the middle frame, stack; add --dry-run to see the plan first):" Classes="muted small" Margin="0,6,0,0" TextWrapping="Wrap" />
+          <SelectableTextBlock Name="StackNightCommand" Text="{Binding StackNightCommand}" Classes="mono" TextWrapping="Wrap" />
+          <TextBlock Text="Or one target by hand with Siril 1.4 (OSC_Preprocessing; OSC_Extract_HaOIII for the ALP-T):" Classes="muted small" Margin="0,6,0,0" />
           <SelectableTextBlock Name="SirilCommand" Text="{Binding SirilCommand}" Classes="mono" TextWrapping="Wrap" />
         </StackPanel>
       </Border>

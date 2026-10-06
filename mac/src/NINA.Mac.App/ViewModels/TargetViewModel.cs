@@ -16,7 +16,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Mac.App.Astro;
 using NINA.Mac.App.Services;
+using Avalonia;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,8 +45,36 @@ namespace NINA.Mac.App.ViewModels {
             DitherEvery = 5;
             StopAtDawn = true;
             SearchText = "";
+            Horizon = new HorizonEditorViewModel(services);
+            Horizon.DraftChanged += (_, _) => OnPropertyChanged(nameof(ChartHorizon));
+            services.HorizonChanged += (_, _) => Refresh();
             services.Mount.Changed += (_, _) => Refresh();
             Search();
+        }
+
+        /// <summary>Target › Horizon: the site's local horizon (table, record from the mount, import/export, save).</summary>
+        public HorizonEditorViewModel Horizon { get; }
+
+        /// <summary>What the sky view draws as the horizon: the table being edited (or the saved horizon when the table is invalid).</summary>
+        public HorizonProfile ChartHorizon => Horizon.Draft ?? services.Horizon;
+
+        public double ChartMaxAltitude => services.Settings.Current.MaxAltitudeDegrees;
+
+        public double ChartMinAltitude => services.Settings.Current.MinAltitudeDegrees;
+
+        /// <summary>The selected target's (azimuth, altitude) from now to dawn, every 10 minutes.</summary>
+        [ObservableProperty]
+        public partial IReadOnlyList<Point> Track { get; set; }
+
+        [ObservableProperty]
+        public partial Point? TargetPoint { get; set; }
+
+        [ObservableProperty]
+        public partial Point? MountPoint { get; set; }
+
+        private void RefreshMountPoint() {
+            var m = services.Mount;
+            MountPoint = m.State == DeviceConnectionState.Connected && m.Azimuth is double az && m.Altitude is double alt ? new Point(az, alt) : null;
         }
 
         public ObservableCollection<CatalogTarget> Results { get; } = new();
@@ -119,15 +149,23 @@ namespace NINA.Mac.App.ViewModels {
         public override void Refresh() {
             Warnings.Clear();
             var target = SelectedTarget;
+            OnPropertyChanged(nameof(ChartHorizon));
+            OnPropertyChanged(nameof(ChartMaxAltitude));
+            OnPropertyChanged(nameof(ChartMinAltitude));
+            RefreshMountPoint();
             if (target == null) {
                 CoordinatesText = AltAzText = TransitText = MaxSubText = null;
                 ExceedsFieldRotationLimit = false;
                 IsObservable = false;
                 Visibility = null;
+                Track = null;
+                TargetPoint = null;
                 return;
             }
             var now = services.Clock.Now;
-            var v = TargetPlanner.Evaluate(target, now, services.Settings.Current, ExposureSeconds);
+            var v = TargetPlanner.Evaluate(target, now, services.Settings.Current, ExposureSeconds, services.Horizon);
+            TargetPoint = new Point(v.Azimuth, v.Altitude);
+            Track = TrackOf(target, now);
             Visibility = v;
             var offset = TimeSpan.FromHours(services.Settings.Current.Site.UtcOffsetHours);
             CoordinatesText = $"RA {SkyMath.FormatHours(target.RightAscensionHours)}  Dec {SkyMath.FormatDegrees(target.DeclinationDegrees)} (J2000)";
@@ -139,6 +177,20 @@ namespace NINA.Mac.App.ViewModels {
             foreach (var w in v.Warnings) {
                 Warnings.Add(w);
             }
+        }
+
+        private IReadOnlyList<Point> TrackOf(CatalogTarget target, DateTimeOffset now) {
+            var site = services.Site;
+            var end = SkyMath.NextAstronomicalDawn(now, site) ?? now.AddHours(12);
+            if (end - now > TimeSpan.FromHours(14)) {
+                end = now.AddHours(14);
+            }
+            var points = new List<Point>();
+            for (var t = now; t <= end; t += TimeSpan.FromMinutes(10)) {
+                var (alt, az) = SkyMath.ToAltAz(t, target.RightAscensionHours, target.DeclinationDegrees, site);
+                points.Add(new Point(az, alt));
+            }
+            return points;
         }
 
         [RelayCommand]

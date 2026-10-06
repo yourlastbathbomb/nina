@@ -43,24 +43,34 @@ namespace NINA.Mac.App.Test.Ui {
         }
 
         [Test]
-        public void SirilFolders() {
+        public void SirilFolders_AreNinaMacSirilsLayout_AsTheRealDevicesWriteIt() {
             var layout = new SessionLayout("/Users/astro/Astro/Nightglass", TestTimes.EveningOct10, 8);
             layout.BiasesDirectory.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/biases");
-            layout.DarksDirectory.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/darks");
+            layout.DarksDirectory.Should().Be("/Users/astro/Astro/Nightglass/library/darks", "the dark library is shared by every night");
             layout.FlatsDirectory.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/flats");
-            layout.LightsDirectory("NGC 253").Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/lights/NGC_253");
-            layout.SnapshotsDirectory.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/snapshots");
+            layout.LightsDirectory("NGC 253").Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/NGC 253/lights");
+            layout.SnapshotsDirectory("NGC 253").Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/NGC 253/snapshots");
             layout.DirectoryFor(FrameType.Snapshot, "M42").Should().NotContain("lights", "snapshots must never land in lights/ (research MVP-M2)");
-            layout.SirilCommand("NGC 253").Should().Be("siril-cli -d \"/Users/astro/Astro/Nightglass/2026-10-10/siril/NGC_253\" -s OSC_Preprocessing.ssf");
+            layout.SirilCommand("NGC 253").Should().Be("siril-cli -d \"/Users/astro/Astro/Nightglass/2026-10-10/NGC 253\" -s OSC_Preprocessing.ssf");
+
+            var real = new NINA.Mac.App.Engine.SirilFolders("/Users/astro/Astro/Nightglass", TestTimes.EveningOct10, TimeZoneInfo.FindSystemTimeZoneById("Asia/Hong_Kong"));
+            foreach (var target in new[] { "NGC 253", "M31:Core", "$weird" }) {
+                layout.LightsDirectory(target).Should().Be(real.LightsDirectory(target), "the simulators report the folders the Real devices write ({0})", target);
+                layout.SirilCommand(target).Should().Be(real.SirilCommand(target));
+            }
+            layout.DarksDirectory.Should().Be(real.DarksDirectory);
+            layout.FlatsDirectory.Should().Be(real.FlatsDirectory);
+            layout.BiasesDirectory.Should().Be(real.BiasesDirectory);
         }
 
         [Test]
-        public void FramePaths() {
+        public void FramePaths_UseNinasFileNames() {
             var layout = new SessionLayout("/r", TestTimes.EveningOct10, 8);
-            layout.FramePath(FrameType.Light, "NGC 253", 10, 252, 2, -0.2, 1).Should().Be("/r/2026-10-10/lights/NGC_253/NGC_253_L_10s_G252_B2_0C_0001.fits");
-            layout.FramePath(FrameType.Dark, "NGC 253", 20, 252, 2, 0.4, 12).Should().Be("/r/2026-10-10/darks/D_20s_G252_B2_0C_0012.fits");
-            layout.FramePath(FrameType.Bias, null, 0.000032, 252, 2, null, 3).Should().Be("/r/2026-10-10/biases/B_0s_G252_B2_0003.fits");
-            layout.FramePath(FrameType.Flat, "x", 0.833, 252, 2, -1.6, 1).Should().Be("/r/2026-10-10/flats/F_0.833s_G252_B2_-2C_0001.fits");
+            using var scope = new FluentAssertions.Execution.AssertionScope();
+            layout.FramePath(FrameType.Light, "NGC 253", 10, 252, 2, -0.2, 1, offset: 8).Should().Be("/r/2026-10-10/NGC 253/lights/2026-10-10_21-00-00_10.00s_2x2_g252_-0.20C_0001.fits");
+            layout.FramePath(FrameType.Dark, "NGC 253", 20, 252, 2, 0.4, 12, offset: 8, setPoint: 0).Should().Be("/r/library/darks/20.00s_g252_o8_0.00C_2x2/2026-10-10_21-00-00_20.00s_2x2_g252_0.40C_0012.fits", "darks go to their dark-library set");
+            layout.FramePath(FrameType.Bias, null, 0.000032, 252, 2, null, 3, offset: 8).Should().Be("/r/2026-10-10/biases/2026-10-10_21-00-00_0.00s_2x2_g252_C_0003.fits");
+            layout.FramePath(FrameType.Flat, "x", 0.833, 252, 2, -1.6, 1, offset: 8).Should().Be("/r/2026-10-10/flats/2026-10-10_21-00-00_0.83s_2x2_g252_-1.60C_0001.fits", "flats without a target are the night's");
         }
 
         [TestCase("NGC 253", "NGC_253")]
@@ -315,7 +325,8 @@ namespace NINA.Mac.App.Test.Ui {
             session.State.Should().Be(SessionState.Finished);
             session.Progress.FramesDone.Should().Be(5);
             session.Progress.StopReason.Should().Be("All frames taken");
-            session.Progress.LastFile.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/lights/NGC_253/NGC_253_L_10s_G252_B2_26C_0005.fits");
+            session.Progress.LastFile.Should().Be("/Users/astro/Astro/Nightglass/2026-10-10/NGC 253/lights/2026-10-10_21-00-55_10.00s_2x2_g252_26.00C_0005.fits",
+                "the simulators report NINA.Mac.Siril's layout and NINA's file names, as the Real devices write them");
             session.Log.Count(l => l.Contains("Dithered")).Should().Be(2);
         }
 

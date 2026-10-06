@@ -75,7 +75,11 @@ namespace NINA.Mac.App.Test.Ui {
                 TestContext.Out.WriteLine($"wall time {sw.Elapsed.TotalMilliseconds:0} ms");
                 RequireSameDisplayState(displays);
                 p.ExitCode.Should().Be(0, stdout.Result + stderr.Result);
-                stdout.Result.Should().Contain("cwd '/'").And.Contain("PASS: 13/13 checks").And.NotContain("[FAIL]");
+                stdout.Result.Should().Contain("cwd '/'").And.Contain("PASS: 14/14 checks").And.NotContain("[FAIL]");
+                // Preflight without devices runs too, against an empty HOME: its bundle checks pass; ASTAP and the rest are missing there
+                stdout.Result.Should().Contain("[ok] preflight (no devices)").And.Contain("PASS  Engine assemblies").And.Contain("PASS  Native libraries")
+                    .And.Contain("PASS  Engine data: JPLEPH and the catalogue scripts are in place, NOVAS reads the ephemeris").And.Contain("FAIL  ASTAP")
+                    .And.Contain("USB not scanned");
                 // M8: the Real device services composed through the headless engine, nothing opened
                 stdout.Result.Should().Contain("[ok] engine (Real devices composed, nothing opened)").And.Contain("NINA data and ephemeris OK");
                 // The real launch path (Avalonia.Native + Skia + HarfBuzz) was set up in a child process
