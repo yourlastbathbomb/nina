@@ -16,7 +16,7 @@ The upstream engine libraries build for `net10.0` / `osx-arm64` without being co
 | `../tests/NINA.Mac.Astrometry.Test` | | SOFA/NOVAS native smoke tests, 50 upstream `NINA.Test` files (63 fixtures) linked unchanged, and mac tests for the resolver, J2000 to JNow, sidereal time, the data folder, the deep-sky database and the startup data check |
 | `../tests/NINA.Mac.Image.Test` | | 18 upstream `NINA.Test` files (16 fixture classes) linked unchanged, and mac tests for the FITS writer (independent reader, fitsverify, CFITSIO's listhead, Siril), the FITS header card by card, XISF round trips, ImageArray/ImageStatistics, the rendering glue, the WpfCompat imaging stand-ins, the star-detection seam, the platform limits and the Accord.Imaging parity. One `[Explicit]` hardware test |
 | `../tests/NINA.Mac.Equipment.Test` | | 9 upstream `NINA.Test` files (10 fixture classes) linked unchanged, and mac tests for the include list's merge guards, the built assembly's references and native imports, the ZWO binding through the resolver, the device choosers, `DirectGuider` with the rig's numbers and the headless capture path. One `[Explicit]` hardware test: NINA's own `ASICamera` takes a bin-2 light into a FITS that Siril opens |
-| `../tests/NINA.Mac.Platesolving.Test` | | All 13 upstream `NINA.Test/PlateSolving` files linked unchanged (5 cases skipped as Windows-only), and mac tests for the replacements' merge guards, the built assembly, ASTAP's and solve-field's arguments and results for this rig, the ASTAP launcher, the generated `astrometry.cfg`, the local solver end to end through NINA's `CLISolver`, and the centring loop against a simulated mount. `[Explicit]` `LocalData` tests solve real FITS files from this Mac with both solvers |
+| `../tests/NINA.Mac.Platesolving.Test` | | All 13 upstream `NINA.Test/PlateSolving` files linked unchanged (5 cases skipped as Windows-only), and mac tests for the replacements' merge guards, the built assembly, ASTAP's and solve-field's arguments and results for this rig, the ASTAP launcher, the generated `astrometry.cfg`, the local solver end to end through NINA's `CLISolver`, and the centring loop against a simulated mount. `[Explicit]` `LocalData` tests solve real FITS files from this Mac with both solvers and run the centring loop with the real ASTAP |
 
 ```bash
 mac/dotnet build mac/src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj      # also builds WpfCompat, Core, Profile and Native
@@ -243,12 +243,13 @@ Every upstream `.cs` under `NINA.Platesolving/` is compiled by glob, as for Core
 The **mac `LocalPlateSolver`** (`LOCAL`, the rig's blind solver):
 
 - `CygwinLocation` is the folder holding `solve-field` and `wcsinfo`; empty (NINA's default) means `/opt/homebrew/bin`, `~/` is expanded, and a path to `solve-field` itself means its folder.
-- It starts `/bin/sh -c 'PATH=$1; export PATH; log=$2; shift 2; exec "$0" "$@" >"$log" 2>&1' <solve-field> <bin>:/usr/bin:/bin:/usr/sbin:/sbin <image>.solve-field.log --config <cfg> <options> <image>`. Paths travel as arguments, never inside the script, so the shell parses none of them; `exec` keeps the process id, so the timeout kills solve-field and its `astrometry-engine` (`LocalPlateSolverMacTest` checks the argv a stand-in `solve-field` receives through NINA's real `CLISolver`, and that a timeout kills its child).
+- It starts `/bin/sh -c 'PATH=$1; export PATH; log=$2; mkdir -p "$3" 2>"$log" || exit 1; shift 2; exec "$0" --temp-dir "$@" >"$log" 2>&1' <solve-field> <bin>:/usr/bin:/bin:/usr/sbin:/sbin <image>.solve-field.log <image>.solve-field-tmp --config <cfg> <options> <image>`. Paths travel as arguments, never inside the script, so the shell parses none of them; `exec` keeps the process id, so the timeout kills solve-field and its `astrometry-engine` (`LocalPlateSolverMacTest` checks the argv a stand-in `solve-field` receives through NINA's real `CLISolver`, and that a timeout kills its child).
+- **Temporary files:** solve-field converts every image into temporary files (an uncompressed copy and a PPM/PGM, 2 MB for a 1920 × 1080 frame, 8 MB for a 2160 × 3840 one), by default in `/tmp`. It deletes them after a solve that ends by itself (checked), but not when it fails early (checked: netpbm missing from `PATH`, an engine error) or is killed: the previous, cut-off attempt at this work had left 33 of them in `/tmp`, 29 of them 2 MB conversions of 1920 × 1080 frames written during its rig-geometry runs, where a failing solve ends in the timeout kill (removed). The launcher passes `--temp-dir <image>.solve-field-tmp` (a folder in NINA's `PlateSolver` working folder, created by the script), and the solver deletes that folder after every solve, whatever the outcome (`LocalPlateSolverMacTest`: after a success, a failure and a timeout kill). After the real solves below, `/tmp` held no `tmp.*` file.
 - The options are upstream's (`--overwrite`, the `none` outputs, `--objs`, `--no-plots`, `--resort`, `--downsample`, `--scale-units arcsecperpix`, `-L`/`-H` = scale ∓ 0.2″/px, `--ra`/`--dec`/`--radius` for a near solve), except that upstream's `-center`, which `getopt_long` reads as `-c enter` (code tolerance 0), is the intended `--crpix-center`, and `--config` names the generated `astrometry.cfg`. At 0.4785″/px that is `-L 0.28 -H 0.68`.
 - **`astrometry.cfg`** (`AstrometryNetSetup`): written before every solve to `<CoreUtil.APPLICATIONTEMPPATH>/Solvers/astrometry.cfg` (only when its text changed): `cpulimit` (default 300 s), one `add_path` per index folder (default `~/Library/Application Support/Astrometry`, spaces kept verbatim; a folder with a line break or leading or trailing whitespace is rejected) and `autoindex`. Homebrew's `etc/astrometry.cfg` is never read or written, and the index folder is only listed (`AstrometryNetSetupTest` compares its listing and timestamps before and after). Validation fails with a clear message when `solve-field` or `wcsinfo` is missing or no folder holds an `index-*.fits` file. `autoindex` also tries the non-index files in that folder (`fetch.log`, `fetch.done`), which only prints "Failed to add index" into the log.
 - **Result:** `ReadResult` runs `<bin>/wcsinfo <file>.wcs` directly and parses its `key value` lines exactly as upstream (`ra_center`/`dec_center`, `orientation_center` → position angle `orientation - 180`, `pixscale`, and the CD matrix for the parity). Difference: success needs `ra_center` and `dec_center`; upstream reported success at RA 0, Dec 0 whenever the `.wcs` existed.
 - **Files:** the `.wcs` output (as upstream), plus solve-field's `.axy` and `.solved` and the log as sidecars: deleted after a solve, archived in `PlateSolver/Failed` with the image after a failure (upstream left `.axy`/`.solved` in the working folder). The tail of the log goes to NINA's log when no `.wcs` was written.
-- **Timeout:** `cpulimit` + 60 s (360 s by default) instead of CLISolver's 10 minutes. The engine honours the config's `cpulimit` only loosely: on this M1 a near solve that could not succeed stopped with "Total CPU time limit reached!" after 19-33 s of CPU for a limit of 5 s, 60 s for 15 s and 243 s (282 s wall) for 60 s (the `--cpulimit` option behaves the same). For a failing solve the timeout is therefore usually what ends it; CLISolver then kills solve-field with its engine and archives the files, with the same "not solved" result.
+- **Timeout:** `cpulimit` + 60 s (360 s by default) instead of CLISolver's 10 minutes. The engine honours the config's `cpulimit` only loosely. Measured on this M1 with a rig-size near solve that cannot succeed (a constructed IC 434 patch, below), run by hand with NINA's arguments while another solve ran alongside: limit 5 s → "Total CPU time limit reached!" after 29.5 s user CPU (42.9 s wall); limit 15 s → 42.4 s CPU (67.0 s wall). With limit 60 s, 25 of the 26 failing near solves in the rig-geometry run below reached the 120 s timeout first. For a failing solve the timeout is therefore usually what ends it; CLISolver then kills solve-field with its engine, the solver deletes the temporary folder and archives the image, `.axy` and log, with the same "not solved" result.
 
 Both upstream position-angle conventions agree: the same CD matrix through `ASTAPSolver.ReadResult` and through the real `wcsinfo` plus the mac `ParseWcsInfo` gives the same position angle and parity (`LocalPlateSolverMacTest`), and so do the two solvers on every real frame below.
 
@@ -263,7 +264,7 @@ NINA's defaults do not work here: `ASTAPLocation` is empty (`%programfiles%\asta
 | `BlindSolverType`, `CygwinLocation`, `BlindFailoverEnabled` | `LOCAL`, `/opt/homebrew/bin`, on | blind fallback through solve-field with the scale hint, never ASTAP `-r 180` (research SLV-M2) |
 | `DownSampleFactor` | 2 | ASTAP `-z 2` / `--downsample 2`; merges the RGGB mosaic of a bin-2 OSC frame (SLV-08) |
 | `SearchRadius` | 5° | after a handset alignment (SLV-08: 2-5°) |
-| `ExposureTime`, `Gain`, `Binning` | 15 s, 450, 2 | risk 4: 10-20 s at high gain; 450 is the SDK's lowest-read-noise gain for the ASI585MC (M1) |
+| `ExposureTime`, `Gain`, `Binning` | 15 s, 450, 2 | risk 4: 10-20 s at high gain; 450 is the gain `ASIGetGainOffset` names as lowest read noise for the ASI585MC (M1, `mac/docs/m1-camera-results.md`). The SDK pairs it with offset 15; `PlateSolveSettings` has no offset, so solve frames use the camera's offset (profile default 3), which may clip some background pixels at gain 450. Not checked on the sky |
 
 Threshold, attempts, re-attempt delay, filter and max stars keep their values. The optical train (2500 mm native, about 1575-1640 mm with the reducer) is `TelescopeSettings.FocalLength`, one profile per train.
 
@@ -276,7 +277,13 @@ Threshold, attempts, re-attempt delay, filter and max stars keep their values. T
 - Slews scattered by about 0.8′ with 2″ solve noise: centred (29.2′, then 0.89′ in the run recorded here; the test allows 2-5 solves). A mount that scatters by 6′ is given up after 10 slews.
 - Near solve fails, blind failover (coordinates cleared) succeeds: centring continues. Nothing solves: CaptureSolver's attempts run, the mount never moves.
 
-REALSOLVE_SUMMARY_PLACEHOLDER
+### Real solves and plan risk 4 (run on this Mac, 2026-10-05; details in the test section below)
+
+- **Both solvers work through NINA's own classes on real data.** Five Seestar S30 Pro stacks from this Mac (IC 434, M51, M42, NGC 7000 twice; 3.66″/px, 1910-3840 px) gave 20 of 20 solves: ASTAP with D80 (`-z 2`, and `-z 0`, NINA's default, which bug 1 used to reject) in 0.3-1.3 s, solve-field near and blind in 2.6-12 s. Against the header WCS the centre is 0.5-1.6″ off, the scale within 0.05 %, the position angle within 0.03° and the parity the same; ASTAP and solve-field agree to 1.5″. The NGC 7000 stack without a WCS agrees with Siril's solution of a crop of the same stack to 0.7″ (ASTAP) and 0.6″ (solve-field).
+- **NINA's centring loop with the real ASTAP** (`RealCenteringTest`): a simulated mount with a 13.9′ goto error, a camera that cuts 1280 × 720 frames out of a stack where the mount really points. On all four stacks with a WCS NINA's `CenteringSolver` measured the error to within 0.03′, synced, re-slewed and finished within 0.03′ of the target in 2 solves. On the dense NGC 7000 field ASTAP's near solve failed both times (`-z 2 -s 500` on a 1280 × 720 crop; by hand, `-s 50` solves the crop at the target, and so does `-z 1` on the same crop of the unstretched stack), and NINA's blind failover to solve-field rescued both solves (the whole centring took 42-64 s in two runs, against 0.3-2.9 s on the other stacks).
+- **Risk 4, the native f/10 field (0.14356° high), cannot be settled from the data on this Mac.** Frames built in this rig's exact geometry from the stacks (36 patches, below) mostly have too few stars: the Seestar stacks show 0-14 stars above 5σ in a 15.3′ × 8.6′ patch away from the Milky Way, and ASTAP stops before it reaches the database ("Only 4 stars found in image. Abort"). Where the M51 stack gives a few more, ASTAP with D80 did solve native-geometry frames (4 solves on 3 patches, 0.6-1.3″ off), so it neither refuses nor misreads a 0.14356° field. On the database side D80 is not the limit: for a native frame with 66 detected stars ASTAP compares 78 database stars from a 0.21° window, and D80 holds them down to magnitude 19.7 at M51, 18.5 at IC 434, 15.4 at NGC 7000 and 14.4 at M42 (ASTAP's `-progress` output, first search position). Whether a 15 s ALP-T frame at f/10 shows enough stars needs a sky test.
+- **The reducer helps, as the plan says:** the same patch centres at the reducer's 0.748″/px (0.224° high) solved 16 of 27 times outside the Milky Way with ASTAP in under a second (0 of 9 on the dense, stretched NGC 7000 stack), against 1-3 of 36 at the native scale.
+- **solve-field as the fallback:** a near solve-field run solved 10 of the 36 native-geometry frames in 2-11 s (8 of them in the star-rich NGC 7000 field), 0.2-2.1″ off; 25 of the 26 failing runs ran into the 120 s timeout (cpulimit 60), the other gave up after 42 s on a patch with no star. With the default cpulimit 300 a failing solve takes 360 s, and NINA's failover is a **blind** solve-field run, which on a 15′ field cannot be expected to be faster. For the native train, a near solve-field (`PlateSolverType = LOCAL`) is the better second choice than the blind failover; this is left as a profile decision, not a default.
 
 ### Where the M3b plan was wrong or incomplete (Platesolving)
 
@@ -287,6 +294,8 @@ REALSOLVE_SUMMARY_PLACEHOLDER
 - §10 item 5's `-fov` "about 0.1436°": NINA's own value is 0.14356 (1080 × 0.47853″/px), passed to ASTAP rounded to 6 places as `0.14356`.
 - §5b counted `CLISolver.cs:149`'s `"cmd.exe"` comparison as harmless; it is, but the same method's unread output pipe (above) was not in the inventory.
 - Not in the plan: upstream's `CliSolverBehaviorTest` needs `cmd.exe`, and two `SolverTranslationBehaviorTest` cases test Windows-only code (see the test section).
+- Not in the plan: solve-field's temporary files in `/tmp` leak whenever a solve is killed or fails early (above), hence `--temp-dir`.
+- Not in the plan: the position angle that NINA reports is the angle at the frame centre. A header whose `CRVAL` lies far from the centre (the Seestar's M51 stack: 1.6° of RA away, at +47°) has north turned by about ΔRA·sin Dec there (1.18° for M51), so comparing a solve with a header needs the header's orientation at the centre, not its CD matrix (`ReferenceWcs.LocalCd`).
 
 ## NINA.Mac.Equipment.Lx200: the LX200GPS driver (M4)
 
@@ -597,18 +606,75 @@ Five upstream cases test code or programs that do not exist on macOS by design. 
 
 ### Results
 
-RESULTS_PLACEHOLDER
+`mac/dotnet test mac/tests/NINA.Mac.Platesolving.Test/NINA.Mac.Platesolving.Test.csproj` (2026-10-05, final run): Passed 139, Failed 0, Skipped 5, Total 144, in about 15 s. The trx file has 147 results: the 3 `[Explicit]` `LocalData` tests are listed as not executed.
 
-### Real solves on this Mac (`Mac/LocalData/RealSolveTest`, `[Explicit]`, category `LocalData`)
+- Upstream: 13 fixture classes, 70 results. 65 passed and 5 were skipped by `MacPlatformSkips` (table above): `PlateSolverFactoryBehaviorTest` 15, `CaptureSolverTest` 9, `CenterSolverTest` 8, `SolverTranslationBehaviorTest` 7 (2 skipped), `CenteringSolverBehaviorTest` 5, `ImageLinkBehaviorTest` 5, `ImageSolverTest` 5, `AstrometryPlateSolverBehaviorTest` 4, `PlateSolveModelBehaviorTest` 4, `CliSolverBehaviorTest` 3 (all skipped), `BaseSolverBehaviorTest` 2, `ImageSolverBehaviorTest` 2, `TheSkyXImageLinkSolverBehaviorTest` 1.
+- Mac: 74 passed: `AstrometryNetSetupTest` 17, `LocalPlateSolverMacTest` 12, `AstapSetupTest` 10, `CenteringLoopTest` 9, `AstapSolverMacTest` 6, `PlatesolvingParityTest` 5, `CliSolverMacTest` 4, `PlatesolvingAssemblyTest` 4, `ReferenceWcsTest` 4, `RigPlateSolveDefaultsTest` 2, `MacPlatformSkipsTest` 1. The tests that run the installed `astap_cli` and `wcsinfo` ran (they are ignored, not failed, where a solver is missing).
+- `NINA_MAC_RUN_SKIPPED=1` with a filter on the five skipped cases: all five fail exactly as the table says (3 × `Win32Exception` starting `cmd.exe`; "Expected a ASTAPValidationFailedException to be thrown, but no exception was thrown"; "Expected hintedArgs to start with "/C """). Upstream's `CliSolverBehaviorTest` then writes into `CliSolver/` under the test output folder, as it does on Windows.
 
-Read-only: the paths come from `NINA_MAC_SOLVE_FRAMES` (`|`-separated) and nothing is copied into the repository. Each frame is read by an independent FITS reader (`FitsCube`, BITPIX 16/-32, 2 or 3 axes), averaged to mono, and handed to NINA as a `BaseImageData`; the solvers come from `PlateSolverFactory` with `RigPlateSolveDefaults` applied (ASTAP through the launcher, `LOCAL` through the generated `astrometry.cfg` and the user's index folder) and run through `ImageSolver`, so CLISolver writes the frame with NINA's FITS writer exactly as in a capture. The reference is the WCS in the file's header (Seestar's or Siril's), evaluated with an independent TAN+SIP implementation (`ReferenceWcs`; at the IC 434 frame's center it agrees with astrometry.net's `wcs-xy2rd` on the same header to 0.03″).
+### Real solves on this Mac (`Mac/LocalData/RealSolveTest`, `RealCenteringTest`, `[Explicit]`, category `LocalData`)
+
+Read-only: the paths come from `NINA_MAC_SOLVE_FRAMES` (`|`-separated) and nothing is copied into the repository. Each frame is read by an independent FITS reader (`FitsCube`, BITPIX 16/-32, 2 or 3 axes), averaged to mono, and handed to NINA as a `BaseImageData`; the solvers come from `PlateSolverFactory` with `RigPlateSolveDefaults` applied (ASTAP through the launcher, `LOCAL` through the generated `astrometry.cfg` and the user's index folder) and run through `ImageSolver`, so CLISolver writes the frame with NINA's FITS writer exactly as in a capture. The reference is the WCS in the file's header (Seestar's or Siril's), evaluated with an independent TAN+SIP implementation (`ReferenceWcs`, unit-tested in `ReferenceWcsTest`; at the centre of every frame with `CTYPE` cards it agrees with astrometry.net's `wcs-xy2rd` on the same header to better than 0.005″). The position angle and parity are compared with the header's orientation at the frame centre (`ReferenceWcs.LocalCd`), in NINA's convention.
 
 ```bash
 NINA_MAC_SOLVE_FRAMES="<a.fit>|<b.fit>" NINA_MAC_SOLVE_REPORT=/tmp/solves.md \
-  mac/dotnet test mac/tests/NINA.Mac.Platesolving.Test/NINA.Mac.Platesolving.Test.csproj --filter "FullyQualifiedName~RealSolveTest"
+  mac/dotnet test mac/tests/NINA.Mac.Platesolving.Test/NINA.Mac.Platesolving.Test.csproj --filter "FullyQualifiedName~RealSolveTest|FullyQualifiedName~RealCenteringTest"
 ```
 
-REALSOLVE_PLACEHOLDER
+`NINA_MAC_SOLVE_GRID` (default `3x3`) sets the patches per frame for `RigGeometry_*`, `NINA_MAC_SOLVE_CPULIMIT` (default 60) solve-field's CPU limit there, `NINA_MAC_SOLVE_BLIND=1` adds blind solve-field runs, `NINA_MAC_CENTER_REPORT=<file>` writes the centring table. A full 3 × 3 run on four frames takes about an hour, almost all of it failing solve-field runs waiting for the timeout.
+
+Frames used (all Seestar S30 Pro stacks of 10 s subs, IMX585 at 160 mm, 16-bit RGB; read in place, never copied):
+
+| Frame | Size | Filter, subs | Reference |
+|---|---|---|---|
+| IC 434 | 2160 × 3840 | LP (dual band), 247 | the Seestar's TAN-SIP header WCS |
+| M51 (the Seestar original in Downloads) | 2160 × 3840 | IR-cut, 305 | the Seestar's TAN-SIP header WCS |
+| M42 | 1910 × 1469 (cropped by Siril 1.2.5) | LP, 88 | CDELT/PC header WCS without `CTYPE` cards (TAN assumed) |
+| NGC 7000 | 2160 × 3840 | LP, 595 | none: only the target's RA/DEC |
+| NGC 7000 stretched | 1938 × 2876 (the same stack cropped, stretched and plate-solved by Siril 1.4.4) | LP, 595 | Siril's TAN-SIP header WCS |
+
+The copy of the M51 stack on the Desktop is Siril 1.2.5's background-extracted version without `CTYPE` cards and without the SIP terms; the original was used.
+
+**Full frames** (`FullFrames_BothSolvers_AgreeWithTheHeaderWcs`, final run 20:41 HKT): time per solve through `ImageSolver` (FITS write, solver, result parsing) / centre error against the reference.
+
+| Frame | ASTAP D80 `-z 2` | ASTAP D80 `-z 0` | solve-field near (5°) | solve-field blind | Scale ″/px, ASTAP / solve-field (header) | PA °, ASTAP / solve-field (header at centre) |
+|---|---|---|---|---|---|---|
+| IC 434 | 1.0 s / 1.1″ | 0.5 s / 1.1″ | 12.0 s / 1.3″ | 10.0 s / 1.3″ | 3.6618 / 3.6609 (3.66088) | 50.25 / 50.25 (50.26) |
+| M51 | 0.6 s / 1.6″ | 0.7 s / 1.6″ | 10.3 s / 0.5″ | 10.4 s / 0.5″ | 3.6617 / 3.6607 (3.66075) | 263.65 / 263.64 (263.64; 262.45 from the CD matrix, which holds at CRVAL) |
+| M42 | 0.3 s / 1.2″ | 0.4 s / 1.0″ | 2.6 s / 1.2″ | 2.8 s / 1.2″ | 3.6629 / 3.6623 (3.66151) | 57.30 / 57.30 (57.31) |
+| NGC 7000 | 1.3 s | 1.1 s | 8.4 s | 7.3 s | 3.6650 / 3.6636 | 295.58 / 295.58 |
+| NGC 7000 stretched | 0.3 s / 1.4″ | 0.3 s / 1.4″ | 5.6 s / 0.5″ | 5.7 s / 0.5″ | 3.6669 / 3.6643 (3.66507) | 295.31 / 295.28 (295.29) |
+
+All parities agree with the header (not flipped). The NGC 7000 stack has no WCS; its solved centre (314.81435°, +44.54132° from ASTAP; 314.81425°, +44.54139° from solve-field) is 11.6′ from the header's target RA/DEC. As an independent check, Siril's WCS of the stretched crop of the same stack, evaluated at the pixel that corresponds to the raw frame's centre, lands 0.7″ from ASTAP's and 0.6″ from solve-field's result. That needed Siril's crop offset (`HISTORY Crop (x=200, y=774, …)`) read with y counted from the top; the other reading is 36′ off. This check was a separate script, not part of the test. Earlier runs the same day gave the same centres; solve-field times vary by a few seconds with the machine's load.
+
+**Centring with the real ASTAP** (`RealCenteringTest`, 1280 × 720 frames cut from the stack at its own 3.66″/px, goto error 12′ E and 7′ S, threshold 1′, sync accepted):
+
+| Frame | Solves | Measured separation, first / second | True error before / after | ASTAP solve times | Blind failovers |
+|---|---|---|---|---|---|
+| IC 434 | 2 | 13.90′ / 0.02′ | 13.89′ / 0.01′ | 0.7 s, 0.2 s | 0 |
+| M51 | 2 | 13.88′ / 0.02′ | 13.88′ / 0.02′ | 0.3 s, 0.2 s | 0 |
+| M42 | 2 | 13.92′ / 0.02′ | 13.89′ / 0.03′ | 0.2 s, 0.2 s | 0 |
+| NGC 7000 stretched | 2 | 13.86′ / 0.01′ | 13.88′ / 0.03′ | 0.7 s, 1.0 s (both failed) | 2 (solve-field; 42-64 s for the whole centring in two runs) |
+
+The test first counted a blind failover as a failure. After the NGC 7000 result it reports failovers instead and still requires that centring converges within the threshold and that the first solve measures the goto error to 10″. On those crops ASTAP finds plenty of stars (554 above its detection level, the brightest 500 used) and searches D80 (282 database stars to magnitude 13.7 per 0.73° window) without a match. Run by hand on a 1280 × 720 crop centred on the target (the second solve's frame) with `-fov 0.7333 -r 5`: the stretched crop solves with `-s 50` (`-z 1` or `-z 2`) and with `-z 1 -s 200`, not with `-s 100` or `-s 1000`; the same crop of the linear (unstretched) stack solves with `-z 1` at every `-s` tried (50-1000) and with `-z 2` only at `-s 50`.
+
+**Rig geometry** (`RigGeometry_PatchesResampledToTheNativeField`, 3 × 3 patch centres per frame on the four frames with a WCS, solve-field cpulimit 60 s, run 19:34-20:33 HKT). Each patch is this rig's native frame, 1920 × 1080 at 0.4785″/px (2500 mm, 2.9 µm × bin 2, ASTAP `-fov 0.14356`), bilinearly resampled from the stack around a patch centre whose sky position the header WCS gives; the hint is 8′ E and 5′ S of the truth, as after a goto. "Stars" counts local maxima above 5 robust σ in the same 15.3′ × 8.6′ at the stack's own resolution, independently of either solver.
+
+| Variant | Solved | Median / max time | Where it solved |
+|---|---|---|---|
+| A: native frame, mono, ASTAP D80 `-z 2` | 1/36 | 0.7 / 22.8 s | M51 (7 stars), 1.3″ |
+| B: native frame as an RGGB mosaic (a bin-2 OSC frame), ASTAP D80 `-z 2` | 3/36 | 0.3 / 27.0 s | M51 (4-7 stars), 0.6-1.3″ |
+| C: the same 15.3′ × 8.6′ at the stack's 3.66″/px (251 × 141 px, no resampling), ASTAP D80 `-z 1` | 0/36 | 0.1 / 13.3 s | none |
+| D: native frame, mono, solve-field near | 10/36 | 120 s (timeout) / 120 s | NGC 7000 8/9 (24-125 stars), IC 434 and M42 one each (6 and 14 stars), 0.2-2.1″, 2.3-11.2 s when solved |
+| R: reducer frame, 1920 × 1080 at 0.748″/px (1600 mm, 0.224° high), mono, ASTAP D80 `-z 2` | 16/36 | 0.5 / 7.8 s | IC 434 5/9, M51 7/9, M42 4/9, NGC 7000 0/9; 0.4-4.0″ |
+
+No reported solution was more than 15″ from where the header WCS puts the patch (the test fails otherwise). Star counts per patch: IC 434 2-8, M51 2-7, M42 0-14, NGC 7000 stretched 24-125.
+
+What this construction can and cannot say:
+- The stacks are 30 mm-aperture integrations at 3.66″/px. Resampled 7.8 × to 0.4785″/px, their stars become 15-20 px blobs with smooth, correlated noise, nothing like a real f/10 frame (seeing-limited stars of about 5 px). Their depth is also not this rig's (25 cm aperture, a 15 s solve frame, the ALP-T dual-band filter).
+- Most native failures in the sparse fields are image-side: ASTAP aborts with "Not enough stars" ("Only 4 stars found in image" on the M51 centre patch) and never reaches the database. They say nothing about D80. Variant C, with no interpolation, fails the same way.
+- D80 itself is not the limit. ASTAP solved native-geometry frames (4 solves on 3 M51 patches), and D80 has the stars a 0.14356° field needs (78 per 0.21° window for 66 image stars, down to magnitude 14.4-19.7 at these targets, see above). The dense NGC 7000 patches are a different case: ASTAP detects enough stars there (66 on the centre patch, against 78 database stars to magnitude 15.4 per window) and searches without a match. That is a stretched, resampled, dual-band (LP) image of a Milky Way emission field, so whether nebula knots, the stretch or the resampling is to blame was not separated.
+- Decision for the first nights is unchanged from the plan: the reducer first, ASTAP `-z 2`, longer solve frames at high gain, and a sky test of the native field before relying on it.
 
 ## Known Windows-only behaviour still in compiled code
 
@@ -639,6 +705,6 @@ Normal build, unique warnings:
 | `NINA.Equipment.Mac` | 5: CS0169 ×2 (`PhdEventGuideStep`'s unused `raDistanceDisplay`/`decDistanceDisplay`) and CS0618 ×3 (`IImageControlVM` exposes the obsolete `IAsyncCommand`/`AsyncCommand<bool>`). The `Mac/` files have none |
 | `NINA.Mac.Equipment.Test` | 4, all CS8604 (nullable) in the linked upstream `EquipmentInfoBehaviorTest`. The mac test files have none |
 | `NINA.Platesolving.Mac` | 0 (CA1416 inventory: 2, `Dc3PinPointSolver.cs:78,174`) |
-| `NINA.Mac.Platesolving.Test` | WARNINGS_PLACEHOLDER |
+| `NINA.Mac.Platesolving.Test` | 26, all in linked upstream fixtures: CS8618 ×19, CS8600 ×3, CS8602, CS8625 (nullable) and CS0618 ×2 (`PlateSolveModelBehaviorTest` reads the obsolete `PlateSolveResult.Orientation`). The mac test files have none |
 
 All of them come from unchanged upstream source.

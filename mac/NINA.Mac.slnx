@@ -17,6 +17,7 @@
     <Project Path="src/NINA.Mac.Siril/NINA.Mac.Siril.csproj" />
     <Project Path="src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
     <Project Path="src/NINA.Mac.ZwoProbe/NINA.Mac.ZwoProbe.csproj" />
+    <Project Path="src/NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
     <Project Path="src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
   </Folder>
   <Folder Name="/src/NINA.Mac.ImageAnalysis/" />
@@ -38,6 +39,7 @@
     <Project Path="tests/NINA.Mac.Image.Test/NINA.Mac.Image.Test.csproj" />
     <Project Path="tests/NINA.Mac.ImageAnalysis.Test/NINA.Mac.ImageAnalysis.Test.csproj" />
     <Project Path="tests/NINA.Mac.Lx200.Test/NINA.Mac.Lx200.Test.csproj" />
+    <Project Path="tests/NINA.Mac.Platesolving.Test/NINA.Mac.Platesolving.Test.csproj" />
     <Project Path="tests/NINA.Mac.RigTools.Test/NINA.Mac.RigTools.Test.csproj" />
     <Project Path="tests/NINA.Mac.Siril.Test/NINA.Mac.Siril.Test.csproj" />
     <Project Path="tests/NINA.Mac.Test/NINA.Mac.Test.csproj" />

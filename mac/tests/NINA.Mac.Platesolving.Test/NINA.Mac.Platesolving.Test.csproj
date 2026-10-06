@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NINA.Platesolving on macOS:
+    - Mac/: merge guards for the replacement and the compile-only stand-ins, the built assembly, the ASTAP and astrometry.net
+      argument and result translation for this rig, the generated ASTAP launcher and astrometry.cfg, the mac LocalPlateSolver
+      end to end through CLISolver with stand-in programs (argument passing, log, sidecars, timeout), and NINA's centring loop
+      against a simulated mount and solver. Tests that run the installed solvers on synthetic data skip when a solver is absent.
+      RealSolveTest and RealCenteringTest are [Explicit] (Category LocalData): they solve FITS files from this Mac with both
+      solvers and run the centring loop with the real ASTAP, read-only, by path from environment variables, and never copy them.
+    - Upstream/: upstream NINA.Test/PlateSolving fixtures, linked unchanged. See ../../src/README-engine.md (NINA.Platesolving).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>NINA.Mac.Platesolving.Test</RootNamespace>
+    <!-- NINA.Platesolving.Mac's Mac/AssemblyInfo.Mac.cs grants this assembly name access to internals, as upstream grants NINA.Test -->
+    <AssemblyName>NINA.Mac.Platesolving.Test</AssemblyName>
+    <!-- As NINA.Test.csproj, so the linked upstream fixtures compile exactly as they do on Windows -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="[7.0.0]" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="6.2.0" />
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NINA.Mac.Native/NINA.Mac.Native.csproj" />
+    <ProjectReference Include="../../src/NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+    <ProjectReference Include="../../src/NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../../src/Accord.Imaging.Mac/Accord.Imaging.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../../src/NINA.Platesolving.Mac/NINA.Platesolving.Mac.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>NinaRoot</_Parameter1>
+      <_Parameter2>$(NinaRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <!-- Upstream NINA.Test fixtures, linked unchanged -->
+  <PropertyGroup>
+    <UpstreamTests>$(NinaRoot)NINA.Test/</UpstreamTests>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- global using NUnit.Framework, plus the SetUpFixture that preloads the natives (DllLoader is a no-op off Windows) -->
+    <Compile Include="$(UpstreamTests)Usings.cs" Link="Upstream/Usings.cs" />
+    <Compile Include="$(UpstreamTests)PlateSolving/*.cs" LinkBase="Upstream/PlateSolving" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Upstream NINA.Platesolving compiled for net10.0 / osx-arm64 (headless engine). Upstream files are linked, never copied:
+    25 of 26 compile unchanged (ASTAPSolver.cs carries the Windows-no-op version-check guard, see ../README-engine.md).
+    Solvers/LocalPlateSolver.cs runs solve-field through cmd.exe and Cygwin bash, so MacReplacements/LocalPlateSolver.cs
+    replaces it by name (same internal type, same constructor): PlateSolverFactory, which NINA.Sequencer and NINA.WPF.Base call
+    statically, then creates the mac solver without any change. MacReplacements/ also holds two compile-only stand-ins for
+    upstream leftovers (an unused `using ASCOM;`, dead WPF image-download code). Mac/ holds the mac-only solver setup:
+    the Nightglass-owned astrometry.cfg, the ASTAP launcher that passes the star database (-d) and the rig's profile defaults.
+    See ../README-engine.md (NINA.Platesolving).
+  -->
+  <Import Project="../Engine.props" />
+
+  <PropertyGroup>
+    <AssemblyName>NINA.Platesolving</AssemblyName>
+    <RootNamespace>NINA.PlateSolving</RootNamespace>
+    <!-- Upstream's folder is NINA.Platesolving, its project NINA.PlateSolving.csproj (UpstreamParityTest resolves it on the case-insensitive APFS volume) -->
+    <UpstreamDir>$(NinaRoot)NINA.Platesolving/</UpstreamDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(UpstreamDir)**/*.cs" Exclude="$(UpstreamDir)obj/**;$(UpstreamDir)bin/**;$(UpstreamDir)publish/**" LinkBase="Upstream" />
+
+    <!-- Cygwin-bound (cmd.exe, then bash.exe, then /usr/bin/solve-field and wcsinfo): replaced by MacReplacements/LocalPlateSolver.cs -->
+    <Compile Remove="$(UpstreamDir)Solvers/LocalPlateSolver.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NINA.Equipment.Mac/NINA.Equipment.Mac.csproj" />
+    <ProjectReference Include="../NINA.Image.Mac/NINA.Image.Mac.csproj" />
+    <ProjectReference Include="../NINA.Astrometry.Mac/NINA.Astrometry.Mac.csproj" />
+    <ProjectReference Include="../NINA.Core.Mac/NINA.Core.Mac.csproj" />
+    <ProjectReference Include="../NINA.Profile.Mac/NINA.Profile.Mac.csproj" />
+    <!-- BitmapSource: PlateSolveProgress.Thumbnail, and the dead AstrometryPlateSolver.GetJobImage -->
+    <ProjectReference Include="../NINA.Mac.WpfCompat/NINA.Mac.WpfCompat.csproj" />
+  </ItemGroup>
+
+  <!-- Same packages and versions as NINA.PlateSolving.csproj -->
+  <ItemGroup>
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.1" />
+  </ItemGroup>
+
+</Project>

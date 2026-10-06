@@ -168,12 +168,15 @@ namespace NINA.PlateSolving.Solvers {
             if (!File.Exists(this.executableLocation)) {
                 throw new ASTAPValidationFailedException($"ASTAP executable not found at {this.executableLocation}");
             }
-            var astapVersionInfo = FileVersionInfo.GetVersionInfo(this.executableLocation);
-            if (astapVersionInfo.FileVersion == null) {
-                // Version below 0.9.1.0
-                // Only allows downsample in the range of 1 to 4
-                if (parameter.DownSampleFactor == 0) {
-                    throw new ASTAPValidationFailedException($"ASTAP version below 0.9.1.0 does not allow auto downsample factor value of 0! Please update your ASTAP version!");
+            // FileVersionInfo only reads Windows version resources; elsewhere FileVersion is always null
+            if (OperatingSystem.IsWindows()) {
+                var astapVersionInfo = FileVersionInfo.GetVersionInfo(this.executableLocation);
+                if (astapVersionInfo.FileVersion == null) {
+                    // Version below 0.9.1.0
+                    // Only allows downsample in the range of 1 to 4
+                    if (parameter.DownSampleFactor == 0) {
+                        throw new ASTAPValidationFailedException($"ASTAP version below 0.9.1.0 does not allow auto downsample factor value of 0! Please update your ASTAP version!");
+                    }
                 }
             }
         }
